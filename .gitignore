@@ -11,7 +11,7 @@ __pycache__/
 # Virtual environments
 # ==========================
 
-venv/
+.venv/
 .env
 
 # ==========================
@@ -19,7 +19,7 @@ venv/
 # ==========================
 
 .env.local
-.env.*
+.env
 
 # ==========================
 # Logs
@@ -53,3 +53,4 @@ build/
 # ==========================
 
 .ipynb_checkpoints
+node_modules/
