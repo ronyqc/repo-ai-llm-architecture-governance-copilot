@@ -1,8 +1,8 @@
 # ==========================
 # Python
 # ==========================
-
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.pyd
@@ -10,47 +10,76 @@ __pycache__/
 # ==========================
 # Virtual environments
 # ==========================
-
 .venv/
-.env
+venv/
+env/
 
 # ==========================
 # Environment files
 # ==========================
-
-.env.local
 .env
+.env.local
+.env.*.local
+
+# ==========================
+# Secrets / keys
+# ==========================
+*.pem
+*.key
+secrets/
+credentials.json
 
 # ==========================
 # Logs
 # ==========================
-
 *.log
 
 # ==========================
 # OS files
 # ==========================
-
 .DS_Store
 Thumbs.db
 
 # ==========================
-# VS Code
+# VS Code / IDE
 # ==========================
-
 .vscode/
+.idea/
 
 # ==========================
 # Build files
 # ==========================
-
 dist/
 build/
 *.egg-info/
+.eggs/
+
+# ==========================
+# Coverage / test artifacts
+# ==========================
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.mypy_cache/
+.ruff_cache/
 
 # ==========================
 # Jupyter
 # ==========================
+.ipynb_checkpoints/
 
-.ipynb_checkpoints
+# ==========================
+# Frontend
+# ==========================
 node_modules/
+
+# ==========================
+# Local data
+# ==========================
+data/raw/
+data/processed/
+*.db
+*.sqlite
+tmp/
+temp/
