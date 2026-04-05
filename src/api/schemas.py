@@ -35,3 +35,31 @@ class QueryResponse(BaseModel):
     latency_ms: float = Field(..., description="Request latency in milliseconds")
     trace_id: str = Field(..., description="Trace identifier for observability")
     session_id: str = Field(..., description="Session identifier associated with the request")
+
+
+class IngestRequest(BaseModel):
+    file_name: str = Field(
+        ...,
+        min_length=1,
+        description="Name of the file to ingest",
+    )
+    file_url: str = Field(
+        ...,
+        min_length=1,
+        description="URL where the file can be retrieved",
+    )
+    knowledge_domain: str = Field(
+        ...,
+        min_length=1,
+        description="Knowledge domain associated with the file",
+    )
+    metadata: dict[str, str] | None = Field(
+        default=None,
+        description="Optional metadata associated with the ingestion request",
+    )
+
+
+class IngestResponse(BaseModel):
+    status: str = Field(..., description="Status of the ingestion request")
+    message: str = Field(..., description="Result message for the ingestion request")
+    trace_id: str = Field(..., description="Trace identifier for observability")
