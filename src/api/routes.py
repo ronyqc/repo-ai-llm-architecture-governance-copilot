@@ -4,7 +4,12 @@ from uuid import uuid4
 
 from fastapi import APIRouter
 
-from src.api.schemas import QueryRequest, QueryResponse
+from src.api.schemas import (
+    IngestRequest,
+    IngestResponse,
+    QueryRequest,
+    QueryResponse,
+)
 
 
 router = APIRouter()
@@ -41,4 +46,15 @@ def query_copilot(payload: QueryRequest) -> QueryResponse:
         latency_ms=latency_ms,
         trace_id=trace_id,
         session_id=session_id,
+    )
+
+
+@router.post("/api/v1/ingest", response_model=IngestResponse)
+def ingest_document(payload: IngestRequest) -> IngestResponse:
+    trace_id = str(uuid4())
+
+    return IngestResponse(
+        status="accepted",
+        message="Ingesta registrada correctamente",
+        trace_id=trace_id,
     )
