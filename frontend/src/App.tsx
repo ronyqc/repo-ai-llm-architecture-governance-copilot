@@ -29,7 +29,7 @@ function App() {
         <section className="panel">
           <h2>Respuesta</h2>
           <div className="response-placeholder">
-            Aquí se mostrará la respuesta del copiloto.
+            Aqui se mostrara la respuesta del copiloto.
           </div>
         </section>
       </main>

@@ -14,7 +14,7 @@ export function HealthStatus() {
       const result = await getHealthStatus();
       setHealth(result);
     } catch (err) {
-      setError("No se pudo conectar con el backend");
+      setError("No se pudo conectar con el backend "+ String(err));
     } finally {
       setLoading(false);
     }
@@ -31,7 +31,7 @@ export function HealthStatus() {
   if (error) {
     return (
       <div>
-        <span>{error}</span>
+        <span>{error}</span>{" "}
         <button onClick={() => void loadHealth()}>Reintentar</button>
       </div>
     );
