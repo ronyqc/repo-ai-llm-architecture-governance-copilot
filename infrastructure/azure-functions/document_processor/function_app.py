@@ -15,6 +15,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from src.processing.document_processor import process_document
 from src.processing.embedding_service import vectorize_chunks
+from src.processing.search_indexer import index_chunks as upload_chunks_to_search
 
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -43,8 +44,9 @@ def process_document_http(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     try:
-        generate_embeddings = _parse_generate_embeddings_flag(
-            payload.get("generate_embeddings", True)
+        should_index_chunks = _parse_boolean_flag(
+            payload.get("index_chunks", True),
+            field_name="index_chunks",
         )
     except ValueError as exc:
         return _json_response(
@@ -65,19 +67,44 @@ def process_document_http(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     try:
-        if generate_embeddings:
-            chunks = vectorize_chunks(chunks)
+        chunks = vectorize_chunks(chunks)
+    except ValueError as exc:
+        return _json_response(
+            {"status": "error", "message": str(exc)},
+            status_code=400,
+        )
     except Exception as exc:
         return _json_response(
             {"status": "error", "message": str(exc)},
             status_code=500,
         )
 
+    indexed_count = 0
+    failed_count = 0
+
+    if should_index_chunks:
+        try:
+            indexing_summary = upload_chunks_to_search(chunks)
+        except ValueError as exc:
+            return _json_response(
+                {"status": "error", "message": str(exc)},
+                status_code=400,
+            )
+        except Exception as exc:
+            return _json_response(
+                {"status": "error", "message": str(exc)},
+                status_code=500,
+            )
+
+        indexed_count = indexing_summary["indexed_count"]
+        failed_count = indexing_summary["failed_count"]
+
     return _json_response(
         {
             "status": "success",
             "chunks_count": len(chunks),
-            "chunks": chunks,
+            "indexed_count": indexed_count,
+            "failed_count": failed_count,
         }
     )
 
@@ -90,8 +117,8 @@ def _json_response(body: dict, status_code: int = 200) -> func.HttpResponse:
     )
 
 
-def _parse_generate_embeddings_flag(value: object) -> bool:
-    """Parse the optional generate_embeddings flag from the request payload."""
+def _parse_boolean_flag(value: object, field_name: str) -> bool:
+    """Parse an optional boolean flag from the request payload."""
     if isinstance(value, bool):
         return value
     if value is None:
@@ -103,6 +130,4 @@ def _parse_generate_embeddings_flag(value: object) -> bool:
         if normalized in {"false", "0", "no"}:
             return False
 
-    raise ValueError(
-        "Field 'generate_embeddings' must be a boolean value if provided."
-    )
+    raise ValueError(f"Field '{field_name}' must be a boolean value if provided.")

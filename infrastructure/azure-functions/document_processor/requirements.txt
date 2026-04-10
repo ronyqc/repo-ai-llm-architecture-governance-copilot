@@ -5,3 +5,5 @@
 azure-functions
 openai>=1.0.0
 python-dotenv>=1.0.1
+azure-core>=1.30.0
+azure-search-documents>=11.6.0
