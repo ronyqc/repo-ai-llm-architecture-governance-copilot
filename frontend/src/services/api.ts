@@ -1,19 +1,35 @@
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+import { env } from "../config/env";
+
+const API_BASE_URL = env.apiBaseUrl.replace(/\/+$/, "");
+
+export type ApiRequestOptions = {
+  accessToken?: string;
+  headers?: HeadersInit;
+  signal?: AbortSignal;
+};
 
 function buildUrl(path: string): string {
-  return `${API_BASE_URL}${path}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE_URL}${normalizedPath}`;
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(
+  path: string,
+  options: ApiRequestOptions = {}
+): Promise<T> {
   const url = buildUrl(path);
+  const headers = new Headers(options.headers);
+  headers.set("Accept", "application/json");
+
+  if (options.accessToken) {
+    headers.set("Authorization", `Bearer ${options.accessToken}`);
+  }
 
   try {
     const response = await fetch(url, {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
+      headers,
+      signal: options.signal,
     });
 
     if (!response.ok) {
@@ -24,7 +40,7 @@ export async function apiGet<T>(path: string): Promise<T> {
   } catch (error) {
     if (error instanceof TypeError) {
       throw new Error(
-        `No se pudo conectar con ${url}. Verifica backend, URL o CORS.`+String(error.message)
+        `No se pudo conectar con ${url}. Verifica backend, URL o CORS. ${error.message}`
       );
     }
 
@@ -34,4 +50,30 @@ export async function apiGet<T>(path: string): Promise<T> {
 
     throw new Error(`Error desconocido al conectar con ${url}`);
   }
+}
+
+export async function apiPost<T>(
+  path: string,
+  body: unknown,
+  accessToken?: string
+): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`POST ${path} failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
 }
