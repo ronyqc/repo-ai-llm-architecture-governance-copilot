@@ -1,5 +1,7 @@
-fastapi==0.116.1
-uvicorn==0.35.0
+# Uncomment to enable Azure Monitor OpenTelemetry
+# Ref: aka.ms/functions-azure-monitor-python 
+# azure-monitor-opentelemetry 
+
 azure-functions
 openai>=1.0.0
 python-dotenv>=1.0.1

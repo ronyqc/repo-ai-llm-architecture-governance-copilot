@@ -83,3 +83,5 @@ data/processed/
 *.sqlite
 tmp/
 temp/
+local.settings.json
+apps/document_processor_function/local.settings.json

@@ -2,7 +2,7 @@
 id: bian-customer-profile
 title: "Customer Profile Management"
 knowledge_domain: bian
-source_type: bian
+source_type: markdown_curated
 document_name: customer-profile-bian
 version: "1.0"
 language: "es"
