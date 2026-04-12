@@ -22,7 +22,7 @@ El módulo concentra tres responsabilidades centrales:
 
 ### Azure Function wrapper
 
-El wrapper se encuentra en `infrastructure/azure-functions/document_processor/function_app.py`. Su función es exponer el procesamiento como un endpoint HTTP y delegar el trabajo real al módulo reusable.
+El wrapper se encuentra en `apps/document_processor_function/function_app.py`. Su función es exponer el procesamiento como un endpoint HTTP y delegar el trabajo real al módulo reusable.
 
 Esta capa se encarga de:
 
