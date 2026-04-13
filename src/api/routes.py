@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from time import perf_counter
 from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from src.api.schemas import (
     IngestRequest,
@@ -10,9 +10,20 @@ from src.api.schemas import (
     QueryRequest,
     QueryResponse,
 )
+from src.core.config import settings
+from src.security.auth import (
+    AuthenticatedUser,
+    require_admin_user,
+    require_authenticated_user,
+)
 
 
 router = APIRouter()
+ingest_dependency = (
+    require_admin_user
+    if settings.REQUIRE_ADMIN_FOR_INGEST
+    else require_authenticated_user
+)
 
 
 @router.get("/api/v1/health")
@@ -33,7 +44,10 @@ def health_check() -> dict[str, object]:
 
 
 @router.post("/api/v1/query", response_model=QueryResponse)
-def query_copilot(payload: QueryRequest) -> QueryResponse:
+def query_copilot(
+    payload: QueryRequest,
+    _user: AuthenticatedUser = Depends(require_authenticated_user),
+) -> QueryResponse:
     start_time = perf_counter()
     session_id = payload.session_id or str(uuid4())
     trace_id = str(uuid4())
@@ -50,7 +64,10 @@ def query_copilot(payload: QueryRequest) -> QueryResponse:
 
 
 @router.post("/api/v1/ingest", response_model=IngestResponse)
-def ingest_document(payload: IngestRequest) -> IngestResponse:
+def ingest_document(
+    payload: IngestRequest,
+    _user: AuthenticatedUser = Depends(ingest_dependency),
+) -> IngestResponse:
     trace_id = str(uuid4())
 
     return IngestResponse(
