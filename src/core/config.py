@@ -20,6 +20,20 @@ def _get_env_bool(name: str, default: bool = False) -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _get_env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    return int(raw_value.strip())
+
+
+def _get_env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    return float(raw_value.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     ENVIRONMENT: str = _get_env("ENVIRONMENT", "development")
@@ -43,7 +57,12 @@ class Settings:
     AZURE_SEARCH_KEY: str = _get_env("AZURE_SEARCH_KEY", "dev-search-key")
     AZURE_SEARCH_INDEX: str = _get_env(
         "AZURE_SEARCH_INDEX",
-        "architecture-governance-index",
+        "idx-agc-knowledge-dev",
+    )
+    AZURE_SEARCH_TOP_K: int = _get_env_int("AZURE_SEARCH_TOP_K", 5)
+    AZURE_SEARCH_SCORE_THRESHOLD: float = _get_env_float(
+        "AZURE_SEARCH_SCORE_THRESHOLD",
+        0.2,  # Avoid 0.0 so low-signal keyword matches do not pass by default.
     )
     AZURE_STORAGE_CONNECTION_STRING: str = _get_env(
         "AZURE_STORAGE_CONNECTION_STRING",
