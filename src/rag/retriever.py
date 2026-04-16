@@ -4,6 +4,7 @@ from dataclasses import asdict
 from dataclasses import dataclass
 
 from src.core.config import Settings, settings
+from src.rag.embeddings import AzureOpenAIEmbeddingClient
 from src.rag.vector_store import AzureSearchVectorStore, SearchChunk, SearchQuery
 
 
@@ -23,11 +24,13 @@ class AzureSearchRetriever:
     def __init__(
         self,
         vector_store: AzureSearchVectorStore,
+        embedding_client: AzureOpenAIEmbeddingClient,
         *,
         default_top_k: int,
         default_score_threshold: float,
     ) -> None:
         self._vector_store = vector_store
+        self._embedding_client = embedding_client
         self._default_top_k = default_top_k
         self._default_score_threshold = default_score_threshold
 
@@ -35,11 +38,13 @@ class AzureSearchRetriever:
     def from_settings(cls, app_settings: Settings = settings) -> "AzureSearchRetriever":
         return cls(
             vector_store=AzureSearchVectorStore.from_settings(app_settings),
+            embedding_client=AzureOpenAIEmbeddingClient.from_settings(app_settings),
             default_top_k=app_settings.AZURE_SEARCH_TOP_K,
             default_score_threshold=app_settings.AZURE_SEARCH_SCORE_THRESHOLD,
         )
 
     def retrieve(self, request: RetrievalRequest) -> list[SearchChunk]:
+        query_vector = self._embedding_client.embed_query(request.query)
         query = SearchQuery(
             text=request.query,
             top_k=request.top_k or self._default_top_k,
@@ -49,6 +54,7 @@ class AzureSearchRetriever:
                 else self._default_score_threshold
             ),
             knowledge_domain=request.knowledge_domain,
+            vector=query_vector,
         )
         return self._vector_store.search(query)
 

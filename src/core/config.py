@@ -48,7 +48,19 @@ class Settings:
     )
     AZURE_OPENAI_DEPLOYMENT: str = _get_env(
         "AZURE_OPENAI_DEPLOYMENT",
-        "gpt-4o-mini",
+        "gpt-4.1",
+    )
+    AZURE_OPENAI_API_VERSION: str = _get_env(
+        "AZURE_OPENAI_API_VERSION",
+        "2024-02-01",
+    )
+    AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT: str = _get_env(
+        "AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT",
+        "text-embedding-3-large",
+    )
+    AZURE_OPENAI_EMBEDDINGS_DIMENSIONS: int = _get_env_int(
+        "AZURE_OPENAI_EMBEDDINGS_DIMENSIONS",
+        1536,
     )
     AZURE_SEARCH_ENDPOINT: str = _get_env(
         "AZURE_SEARCH_ENDPOINT",
@@ -58,6 +70,10 @@ class Settings:
     AZURE_SEARCH_INDEX: str = _get_env(
         "AZURE_SEARCH_INDEX",
         "idx-agc-knowledge-dev",
+    )
+    AZURE_SEARCH_VECTOR_FIELD: str = _get_env(
+        "AZURE_SEARCH_VECTOR_FIELD",
+        "content_vector",
     )
     AZURE_SEARCH_TOP_K: int = _get_env_int("AZURE_SEARCH_TOP_K", 5)
     AZURE_SEARCH_SCORE_THRESHOLD: float = _get_env_float(
