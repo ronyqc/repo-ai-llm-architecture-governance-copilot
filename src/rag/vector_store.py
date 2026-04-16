@@ -7,9 +7,11 @@ try:
     from azure.core.credentials import AzureKeyCredential
     from azure.core.exceptions import AzureError
     from azure.search.documents import SearchClient
+    from azure.search.documents.models import VectorizedQuery
 except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal local envs
     AzureKeyCredential = None
     SearchClient = Any
+    VectorizedQuery = None
 
     class AzureError(Exception):
         """Fallback Azure SDK base exception when azure-core is unavailable."""
@@ -60,6 +62,7 @@ class SearchQuery:
     top_k: int
     score_threshold: float = 0.0
     knowledge_domain: str | None = None
+    vector: list[float] | None = None
 
 
 class AzureSearchVectorStore:
@@ -71,11 +74,15 @@ class AzureSearchVectorStore:
         endpoint: str,
         api_key: str,
         index_name: str,
+        vector_field: str,
+        vector_dimensions: int,
         client: SearchClient | None = None,
     ) -> None:
         self._endpoint = endpoint.strip()
         self._api_key = api_key.strip()
         self._index_name = index_name.strip()
+        self._vector_field = vector_field.strip()
+        self._vector_dimensions = vector_dimensions
         self._validate_configuration()
         if client is None and AzureKeyCredential is None:
             raise AzureSearchConfigurationError(
@@ -94,6 +101,8 @@ class AzureSearchVectorStore:
             endpoint=app_settings.AZURE_SEARCH_ENDPOINT,
             api_key=app_settings.AZURE_SEARCH_KEY,
             index_name=app_settings.AZURE_SEARCH_INDEX,
+            vector_field=app_settings.AZURE_SEARCH_VECTOR_FIELD,
+            vector_dimensions=app_settings.AZURE_OPENAI_EMBEDDINGS_DIMENSIONS,
         )
 
     def search(self, query: SearchQuery) -> list[SearchChunk]:
@@ -108,13 +117,12 @@ class AzureSearchVectorStore:
         )
 
         try:
-            # T31 keeps retrieval in the simplest functional mode: keyword search.
-            # T32 will introduce query embeddings so this call can evolve to vector search.
-            # Later iterations can combine both into hybrid search and add semantic ranking.
+            vector_queries = self._build_vector_queries(query)
             results = self._client.search(
-                search_text=query.text,
+                search_text=None,
                 filter=filter_expression,
                 top=query.top_k,
+                vector_queries=vector_queries,
             )
         except AzureError as exc:
             logger.exception("Azure AI Search query failed")
@@ -143,11 +151,17 @@ class AzureSearchVectorStore:
             missing.append("AZURE_SEARCH_KEY")
         if not self._index_name:
             missing.append("AZURE_SEARCH_INDEX")
+        if not self._vector_field:
+            missing.append("AZURE_SEARCH_VECTOR_FIELD")
 
         if missing:
             raise AzureSearchConfigurationError(
                 "Missing Azure AI Search configuration: "
                 + ", ".join(sorted(missing))
+            )
+        if self._vector_dimensions <= 0:
+            raise AzureSearchConfigurationError(
+                "Azure AI Search vector dimensions must be greater than zero."
             )
 
     @staticmethod
@@ -160,6 +174,10 @@ class AzureSearchVectorStore:
             raise ValueError("score_threshold must be greater than or equal to zero.")
         if query.knowledge_domain:
             AzureSearchVectorStore._validate_knowledge_domain(query.knowledge_domain)
+        if query.vector is None:
+            raise ValueError("Query vector is required for vector retrieval.")
+        if not query.vector:
+            raise ValueError("Query vector must not be empty.")
 
     @staticmethod
     def _validate_knowledge_domain(knowledge_domain: str) -> None:
@@ -178,6 +196,30 @@ class AzureSearchVectorStore:
         cls._validate_knowledge_domain(knowledge_domain)
         escaped_value = knowledge_domain.replace("'", "''")
         return f"knowledge_domain eq '{escaped_value}'"
+
+    def _build_vector_queries(self, query: SearchQuery) -> list[Any]:
+        if len(query.vector or []) != self._vector_dimensions:
+            raise ValueError(
+                "Query vector dimension mismatch: "
+                f"expected {self._vector_dimensions}, received {len(query.vector or [])}."
+            )
+
+        if VectorizedQuery is None:
+            return [
+                {
+                    "vector": query.vector,
+                    "fields": self._vector_field,
+                    "k_nearest_neighbors": query.top_k,
+                }
+            ]
+
+        return [
+            VectorizedQuery(
+                vector=query.vector,
+                fields=self._vector_field,
+                k_nearest_neighbors=query.top_k,
+            )
+        ]
 
     @staticmethod
     def _normalize_result(result: dict) -> SearchChunk:
