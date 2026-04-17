@@ -17,6 +17,14 @@ function formatAnswer(answer: string) {
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
 
+      const heading = lines.length === 1 && /^##\s+/.test(lines[0]);
+      if (heading) {
+        return {
+          type: "heading" as const,
+          content: lines[0].replace(/^##\s+/, ""),
+        };
+      }
+
       const isBulletBlock = lines.every((line) => /^[-*]\s+/.test(line));
       if (isBulletBlock) {
         return {
@@ -144,7 +152,11 @@ function App() {
               <div className="response-card">
                 <div className="response-body">
                   {formattedAnswer.map((block, index) =>
-                    block.type === "list" ? (
+                    block.type === "heading" ? (
+                      <h3 className="answer-heading" key={`heading-${index}`}>
+                        {block.content}
+                      </h3>
+                    ) : block.type === "list" ? (
                       <ul className="answer-list" key={`list-${index}`}>
                         {block.items.map((item) => (
                           <li key={item}>{item}</li>

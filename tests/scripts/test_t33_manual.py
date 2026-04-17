@@ -32,6 +32,7 @@ def run_test(query: str) -> None:
 
 
 if __name__ == "__main__":
-    print("Manual validation for T33: retrieval + context consolidation + Azure OpenAI answer generation")
+    print("Manual validation for T34: grounded retrieval + structured Spanish answer generation")
     run_test("Que building blocks se recomiendan para autenticacion en arquitectura empresarial?")
     run_test("Que referencias BIAN se relacionan con customer profile?")
+    run_test("Cual es el clima en Lima hoy?")

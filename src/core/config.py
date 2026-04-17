@@ -80,6 +80,14 @@ class Settings:
         "AZURE_SEARCH_SCORE_THRESHOLD",
         0.2,  # Avoid 0.0 so low-signal keyword matches do not pass by default.
     )
+    AZURE_SEARCH_PRECHECK_TOP_K: int = _get_env_int(
+        "AZURE_SEARCH_PRECHECK_TOP_K",
+        1,
+    )
+    AZURE_SEARCH_PRECHECK_SCORE_THRESHOLD: float = _get_env_float(
+        "AZURE_SEARCH_PRECHECK_SCORE_THRESHOLD",
+        0.6,
+    )
     AZURE_STORAGE_CONNECTION_STRING: str = _get_env(
         "AZURE_STORAGE_CONNECTION_STRING",
         "UseDevelopmentStorage=true",
