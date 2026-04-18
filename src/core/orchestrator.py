@@ -4,11 +4,18 @@ from dataclasses import dataclass
 from enum import Enum
 import re
 from typing import Protocol
+import unicodedata
 
 from src.core.config import Settings, settings
 from src.core.llm_client import (
     AzureOpenAILLMClient,
     LLMGenerationRequest,
+)
+from src.core.routing import (
+    LLMQueryRouter,
+    QueryRouter,
+    RetrievalStrategy,
+    RoutingDecision,
 )
 from src.rag.retriever import AzureSearchRetriever, RetrievalRequest
 from src.rag.vector_store import SearchChunk
@@ -101,32 +108,25 @@ class KeywordQueryScopeClassifier:
         "clima",
         "temperatura",
         "pronostico",
-        "pronóstico",
         "lluvia",
         "hora",
         "fecha",
-        "cumpleaños",
         "cumpleanos",
-        "cumpleaños",
         "receta",
         "cocina",
         "futbol",
-        "fútbol",
         "partido",
         "deporte",
         "noticias",
+        "noticias generales",
         "farandula",
-        "farándula",
         "pelicula",
-        "película",
         "musica",
-        "música",
         "trafico",
-        "tráfico",
     )
 
     def assess(self, query: str) -> ScopeAssessment:
-        normalized_query = re.sub(r"\s+", " ", query).strip().lower()
+        normalized_query = self._normalize_text(query)
         positive_matches = [
             hint for hint in self._POSITIVE_HINTS if hint in normalized_query
         ]
@@ -151,15 +151,21 @@ class KeywordQueryScopeClassifier:
             reason="no_local_scope_hints",
         )
 
+    @staticmethod
+    def _normalize_text(value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", value)
+        ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+        return re.sub(r"\s+", " ", ascii_only).strip().lower()
+
 
 class BasicQueryOrchestrator:
-    """Grounded query orchestrator for T34 final answer generation."""
+    """Grounded query orchestrator with low-cost scope filter and LLM router."""
 
     OUT_OF_SCOPE_MESSAGE = (
         "La consulta se encuentra fuera del alcance del Architecture Governance Copilot."
     )
     INSUFFICIENT_CONTEXT_MESSAGE = (
-        "No cuento con suficiente contexto confiable para emitir una recomendación fundamentada."
+        "No cuento con suficiente contexto confiable para emitir una recomendacion fundamentada."
     )
 
     def __init__(
@@ -167,12 +173,18 @@ class BasicQueryOrchestrator:
         *,
         retriever: AzureSearchRetriever,
         llm_client: AzureOpenAILLMClient,
+        query_router: QueryRouter | None = None,
         scope_classifier: QueryScopeClassifier | None = None,
         precheck_top_k: int,
         precheck_score_threshold: float,
     ) -> None:
         self._retriever = retriever
         self._llm_client = llm_client
+        self._query_router = query_router or LLMQueryRouter(
+            llm_client=llm_client,
+            temperature=0.0,
+            max_tokens=160,
+        )
         self._scope_classifier = scope_classifier or KeywordQueryScopeClassifier()
         self._precheck_top_k = precheck_top_k
         self._precheck_score_threshold = precheck_score_threshold
@@ -182,6 +194,7 @@ class BasicQueryOrchestrator:
         return cls(
             retriever=AzureSearchRetriever.from_settings(app_settings),
             llm_client=AzureOpenAILLMClient.from_settings(app_settings),
+            query_router=LLMQueryRouter.from_settings(app_settings),
             precheck_top_k=app_settings.AZURE_SEARCH_PRECHECK_TOP_K,
             precheck_score_threshold=app_settings.AZURE_SEARCH_PRECHECK_SCORE_THRESHOLD,
         )
@@ -195,17 +208,22 @@ class BasicQueryOrchestrator:
                 tokens_used=0,
             )
 
-        precheck_chunks = self._run_precheck(request.query)
-        if not precheck_chunks:
-            fallback_answer = (
-                self._build_insufficient_context_answer()
-                if scope_assessment.decision is ScopeDecision.IN_SCOPE
-                else self._build_out_of_scope_answer()
-            )
+        routing_decision = self._query_router.route(request.query)
+        if routing_decision.strategy is RetrievalStrategy.OUT_OF_SCOPE:
             return QueryOrchestrationResult(
-                answer=fallback_answer,
+                answer=self._build_out_of_scope_answer(),
                 sources=[],
-                tokens_used=0,
+                tokens_used=routing_decision.tokens_used,
+            )
+
+        if routing_decision.strategy in (
+            RetrievalStrategy.CONFLUENCE_ONLY,
+            RetrievalStrategy.BOTH,
+        ):
+            return QueryOrchestrationResult(
+                answer=self._build_pending_strategy_answer(routing_decision),
+                sources=[],
+                tokens_used=routing_decision.tokens_used,
             )
 
         chunks = self._retriever.retrieve(RetrievalRequest(query=request.query))
@@ -215,7 +233,7 @@ class BasicQueryOrchestrator:
             return QueryOrchestrationResult(
                 answer=self._build_insufficient_context_answer(),
                 sources=[],
-                tokens_used=0,
+                tokens_used=routing_decision.tokens_used,
             )
 
         context_block = self._build_context_block(chunks)
@@ -237,59 +255,50 @@ class BasicQueryOrchestrator:
         return QueryOrchestrationResult(
             answer=llm_result.answer,
             sources=sources,
-            tokens_used=llm_result.tokens_used,
-        )
-
-    def _run_precheck(self, query: str) -> list[SearchChunk]:
-        return self._retriever.retrieve(
-            RetrievalRequest(
-                query=query,
-                top_k=self._precheck_top_k,
-                score_threshold=self._precheck_score_threshold,
-            )
+            tokens_used=routing_decision.tokens_used + llm_result.tokens_used,
         )
 
     @staticmethod
     def _build_system_prompt() -> str:
         return (
             "Eres un copiloto experto en gobierno de arquitectura de soluciones para una "
-            "organización del sector financiero.\n\n"
-            "Tu función es analizar casos de uso y escenarios de negocio descritos en "
-            "lenguaje natural, para asistir al equipo de arquitectura en la revisión "
-            "conceptual de propuestas de solución.\n\n"
-            "Debes apoyarte únicamente en el contexto recuperado por el sistema, el cual "
-            "puede incluir building blocks arquitectónicos institucionales, lineamientos, "
-            "patrones, buenas prácticas y referencias del marco BIAN.\n\n"
+            "organizacion del sector financiero.\n\n"
+            "Tu funcion es analizar casos de uso y escenarios de negocio descritos en "
+            "lenguaje natural, para asistir al equipo de arquitectura en la revision "
+            "conceptual de propuestas de solucion.\n\n"
+            "Debes apoyarte unicamente en el contexto recuperado por el sistema, el cual "
+            "puede incluir building blocks arquitectonicos institucionales, lineamientos, "
+            "patrones, buenas practicas y referencias del marco BIAN.\n\n"
             "OBJETIVO DE LA RESPUESTA\n"
             "Debes ayudar a identificar:\n"
             "1. posibles building blocks reutilizables,\n"
             "2. lineamientos o patrones aplicables,\n"
             "3. posibles alineamientos con service domains de BIAN,\n"
-            "4. observaciones y recomendaciones arquitectónicas.\n\n"
+            "4. observaciones y recomendaciones arquitectonicas.\n\n"
             "RESTRICCIONES\n"
-            "- No inventes información.\n"
+            "- No inventes informacion.\n"
             "- No asumas decisiones no sustentadas por el contexto disponible.\n"
-            "- Si no existe suficiente información, indícalo explícitamente.\n"
-            "- No proporciones detalles técnicos de bajo nivel si no son relevantes para el análisis conceptual.\n"
-            "- No expongas información sensible.\n\n"
+            "- Si no existe suficiente informacion, indicalo explicitamente.\n"
+            "- No proporciones detalles tecnicos de bajo nivel si no son relevantes para el analisis conceptual.\n"
+            "- No expongas informacion sensible.\n\n"
             "MANEJO DE CONSULTAS FUERA DE ALCANCE\n"
             "Si la consulta no corresponde al dominio de arquitectura de soluciones, responde exactamente:\n"
             f"\"{BasicQueryOrchestrator.OUT_OF_SCOPE_MESSAGE}\"\n\n"
             "MANEJO DE FALTA DE CONTEXTO\n"
-            "Si no existe suficiente información, responde exactamente:\n"
+            "Si no existe suficiente informacion, responde exactamente:\n"
             f"\"{BasicQueryOrchestrator.INSUFFICIENT_CONTEXT_MESSAGE}\"\n\n"
             "FORMATO DE RESPUESTA\n"
-            "Responde siempre en español usando Markdown claro con la siguiente estructura exacta:\n"
+            "Responde siempre en espanol usando Markdown claro con la siguiente estructura exacta:\n"
             "## 1. Resumen del caso\n"
             "## 2. Hallazgos relevantes\n"
-            "## 3. Recomendaciones arquitectónicas\n"
+            "## 3. Recomendaciones arquitectonicas\n"
             "## 4. Posible alineamiento BIAN\n"
             "## 5. Fuentes consultadas\n\n"
-            "Dentro de las secciones 2, 3, 4 y 5 usa listas con viñetas `-` cuando corresponda.\n"
+            "Dentro de las secciones 2, 3, 4 y 5 usa listas con vinetas `-` cuando corresponda.\n"
             "ESTILO\n"
-            "- Profesional y técnico\n"
+            "- Profesional y tecnico\n"
             "- Claro y estructurado\n"
-            "- Enfocado en análisis conceptual\n"
+            "- Enfocado en analisis conceptual\n"
             "- Sin contradicciones entre recomendaciones y falta de contexto\n"
         )
 
@@ -308,12 +317,12 @@ class BasicQueryOrchestrator:
         )
         evidence_note = (
             "La evidencia recuperada es suficientemente directa para formular recomendaciones concretas, "
-            "siempre que cada punto esté sustentado en el contexto."
+            "siempre que cada punto este sustentado en el contexto."
             if context_strength is ContextStrength.STRONG
             else (
-                "La evidencia recuperada es parcial o tangencial. No formules recomendaciones específicas "
-                "como si fueran concluyentes. Explica explícitamente que el contexto encontrado es indirecto "
-                "o insuficiente para una recomendación cerrada."
+                "La evidencia recuperada es parcial o tangencial. No formules recomendaciones especificas "
+                "como si fueran concluyentes. Explica explicitamente que el contexto encontrado es indirecto "
+                "o insuficiente para una recomendacion cerrada."
             )
         )
         return (
@@ -322,7 +331,7 @@ class BasicQueryOrchestrator:
             f"{query}\n\n"
             "Nivel de confianza del contexto recuperado:\n"
             f"{context_strength.value}\n\n"
-            "Interpretación operativa del nivel de confianza:\n"
+            "Interpretacion operativa del nivel de confianza:\n"
             f"{evidence_note}\n\n"
             "Fuentes deduplicadas disponibles para sustento:\n"
             f"{source_titles}\n\n"
@@ -331,11 +340,11 @@ class BasicQueryOrchestrator:
             "Instrucciones operativas:\n"
             "1. Usa solo el contexto recuperado.\n"
             "2. Si mencionas building blocks, patrones o referencias BIAN, deben aparecer en el contexto.\n"
-            "3. Si un punto no está sustentado, indícalo como no confirmado.\n"
-            "4. Si el contexto es parcial o tangencial, evita recomendar un patrón o building block específico con falsa certeza.\n"
-            "5. En \"Fuentes consultadas\", cita por título las fuentes deduplicadas que realmente sustentan tu respuesta.\n"
+            "3. Si un punto no esta sustentado, indicalo como no confirmado.\n"
+            "4. Si el contexto es parcial o tangencial, evita recomendar un patron o building block especifico con falsa certeza.\n"
+            "5. En \"Fuentes consultadas\", cita por titulo las fuentes deduplicadas que realmente sustentan tu respuesta.\n"
             "6. Usa Markdown limpio con encabezados `##` y listas con `-`.\n"
-            "7. Mantén el formato exacto solicitado en el system prompt."
+            "7. Manten el formato exacto solicitado en el system prompt."
         )
 
     @staticmethod
@@ -370,13 +379,47 @@ class BasicQueryOrchestrator:
                 cls.INSUFFICIENT_CONTEXT_MESSAGE,
                 "## 2. Hallazgos relevantes",
                 "- No se recuperaron fragmentos confiables desde Azure AI Search para sustentar la consulta.",
-                "## 3. Recomendaciones arquitectónicas",
-                "- Reformular la consulta con más contexto de negocio o arquitectura.",
+                "## 3. Recomendaciones arquitectonicas",
+                "- Reformular la consulta con mas contexto de negocio o arquitectura.",
                 "- Indicar building blocks, capability domains, patrones o service domains esperados si se conocen.",
                 "## 4. Posible alineamiento BIAN",
                 "- No es posible proponer un alineamiento BIAN sustentado con la evidencia recuperada.",
                 "## 5. Fuentes consultadas",
                 "- No se encontraron fuentes relevantes en el contexto recuperado.",
+            ]
+        )
+
+    @classmethod
+    def _build_pending_strategy_answer(cls, decision: RoutingDecision) -> str:
+        if decision.strategy is RetrievalStrategy.CONFLUENCE_ONLY:
+            summary = (
+                "La consulta depende de documentacion interna o acuerdos recientes del equipo."
+            )
+            recommendation = (
+                "La estrategia requerida es CONFLUENCE_ONLY, pero la integracion real con Confluence aun no esta habilitada en T34A."
+            )
+        else:
+            summary = (
+                "La consulta combina lineamientos institucionales y documentacion interna reciente."
+            )
+            recommendation = (
+                "La estrategia requerida es BOTH, pero la integracion real con Confluence aun no esta habilitada en T34A."
+            )
+
+        return "\n\n".join(
+            [
+                "## 1. Resumen del caso",
+                summary,
+                "## 2. Hallazgos relevantes",
+                f"- Decision de routing: {decision.strategy.value}.",
+                f"- Razon del router: {decision.reason}",
+                "## 3. Recomendaciones arquitectonicas",
+                f"- {recommendation}",
+                "- Mantener el contrato actual del endpoint mientras se incorpora la estrategia completa en una tarea posterior.",
+                "## 4. Posible alineamiento BIAN",
+                "- No corresponde proponer alineamiento BIAN sin contexto recuperado.",
+                "## 5. Fuentes consultadas",
+                "- No se consultaron fuentes porque la estrategia depende de Confluence, aun no conectado.",
             ]
         )
 

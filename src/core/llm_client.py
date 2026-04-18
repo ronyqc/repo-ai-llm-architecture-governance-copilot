@@ -39,7 +39,7 @@ class LLMGenerationResult:
 
 
 class AzureOpenAILLMClient:
-    """Small Azure OpenAI wrapper dedicated to final answer generation."""
+    """Small Azure OpenAI wrapper for text generation tasks."""
 
     def __init__(
         self,
@@ -73,6 +73,18 @@ class AzureOpenAILLMClient:
             api_key=app_settings.AZURE_OPENAI_API_KEY,
             api_version=app_settings.AZURE_OPENAI_API_VERSION,
             deployment=app_settings.AZURE_OPENAI_DEPLOYMENT,
+        )
+
+    @classmethod
+    def from_router_settings(
+        cls,
+        app_settings: Settings = settings,
+    ) -> "AzureOpenAILLMClient":
+        return cls(
+            endpoint=app_settings.AZURE_OPENAI_ENDPOINT,
+            api_key=app_settings.AZURE_OPENAI_API_KEY,
+            api_version=app_settings.AZURE_OPENAI_API_VERSION,
+            deployment=app_settings.AZURE_OPENAI_ROUTER_DEPLOYMENT,
         )
 
     def generate_answer(

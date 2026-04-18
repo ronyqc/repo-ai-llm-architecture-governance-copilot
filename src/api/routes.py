@@ -17,6 +17,7 @@ from src.core.llm_client import (
     AzureOpenAILLMError,
 )
 from src.core.orchestrator import BasicQueryOrchestrator, QueryOrchestrationRequest
+from src.core.routing import QueryRoutingError
 from src.rag.embeddings import (
     AzureOpenAIEmbeddingConfigurationError,
     AzureOpenAIEmbeddingError,
@@ -100,6 +101,7 @@ def query_copilot(
         AzureOpenAIEmbeddingError,
         AzureSearchQueryError,
         AzureOpenAILLMError,
+        QueryRoutingError,
     ) as exc:
         logger.exception("Query execution failed. trace_id=%s", trace_id)
         raise HTTPException(

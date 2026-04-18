@@ -50,9 +50,24 @@ class Settings:
         "AZURE_OPENAI_DEPLOYMENT",
         "gpt-4.1",
     )
+    AZURE_OPENAI_ROUTER_DEPLOYMENT: str = (
+        _get_env("AZURE_OPENAI_ROUTER_DEPLOYMENT")
+        or _get_env(
+            "AZURE_OPENAI_DEPLOYMENT",
+            "gpt-4.1",
+        )
+    )
     AZURE_OPENAI_API_VERSION: str = _get_env(
         "AZURE_OPENAI_API_VERSION",
         "2024-02-01",
+    )
+    AZURE_OPENAI_ROUTER_MAX_TOKENS: int = _get_env_int(
+        "AZURE_OPENAI_ROUTER_MAX_TOKENS",
+        160,
+    )
+    AZURE_OPENAI_ROUTER_TEMPERATURE: float = _get_env_float(
+        "AZURE_OPENAI_ROUTER_TEMPERATURE",
+        0.0,
     )
     AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT: str = _get_env(
         "AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT",
