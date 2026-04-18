@@ -17,8 +17,18 @@ from src.core.routing import (
     RetrievalStrategy,
     RoutingDecision,
 )
+from src.integrations.confluence_client import (
+    ConfluenceClient,
+    ConfluenceCloudClient,
+    ConfluencePage,
+    ConfluenceSearchRequest,
+)
 from src.rag.retriever import AzureSearchRetriever, RetrievalRequest
 from src.rag.vector_store import SearchChunk
+from src.utils.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -46,6 +56,20 @@ class QueryOrchestrationResult:
     answer: str
     sources: list[QuerySource]
     tokens_used: int
+
+
+@dataclass(frozen=True)
+class ContextChunk:
+    """Normalized chunk from any retrieval strategy before final prompting."""
+
+    source_id: str
+    source_type: str
+    title: str
+    content: str
+    score: float
+    source_url: str | None = None
+    document_name: str | None = None
+    knowledge_domain: str | None = None
 
 
 class ContextStrength(str, Enum):
@@ -103,6 +127,10 @@ class KeywordQueryScopeClassifier:
         "servicio",
         "capabilidad",
         "capability",
+        "decision interna",
+        "acuerdo interno",
+        "confluence",
+        "documentacion interna",
     )
     _NEGATIVE_HINTS = (
         "clima",
@@ -159,7 +187,7 @@ class KeywordQueryScopeClassifier:
 
 
 class BasicQueryOrchestrator:
-    """Grounded query orchestrator with low-cost scope filter and LLM router."""
+    """Grounded query orchestrator with low-cost scope filter and runtime routing."""
 
     OUT_OF_SCOPE_MESSAGE = (
         "La consulta se encuentra fuera del alcance del Architecture Governance Copilot."
@@ -173,6 +201,7 @@ class BasicQueryOrchestrator:
         *,
         retriever: AzureSearchRetriever,
         llm_client: AzureOpenAILLMClient,
+        confluence_client: ConfluenceClient | None = None,
         query_router: QueryRouter | None = None,
         scope_classifier: QueryScopeClassifier | None = None,
         precheck_top_k: int,
@@ -180,12 +209,15 @@ class BasicQueryOrchestrator:
     ) -> None:
         self._retriever = retriever
         self._llm_client = llm_client
+        self._confluence_client = confluence_client
         self._query_router = query_router or LLMQueryRouter(
             llm_client=llm_client,
             temperature=0.0,
             max_tokens=160,
         )
         self._scope_classifier = scope_classifier or KeywordQueryScopeClassifier()
+        # Kept only for constructor/settings backward compatibility.
+        # Runtime routing no longer uses semantic precheck thresholds after T34A/T34B.
         self._precheck_top_k = precheck_top_k
         self._precheck_score_threshold = precheck_score_threshold
 
@@ -194,14 +226,30 @@ class BasicQueryOrchestrator:
         return cls(
             retriever=AzureSearchRetriever.from_settings(app_settings),
             llm_client=AzureOpenAILLMClient.from_settings(app_settings),
+            confluence_client=ConfluenceCloudClient.from_settings(app_settings),
             query_router=LLMQueryRouter.from_settings(app_settings),
             precheck_top_k=app_settings.AZURE_SEARCH_PRECHECK_TOP_K,
             precheck_score_threshold=app_settings.AZURE_SEARCH_PRECHECK_SCORE_THRESHOLD,
         )
 
     def answer(self, request: QueryOrchestrationRequest) -> QueryOrchestrationResult:
+        logger.info(
+            "Query orchestration started. trace_id=%s query_preview=%s",
+            request.trace_id,
+            _preview_text(request.query),
+        )
         scope_assessment = self._scope_classifier.assess(request.query)
+        logger.info(
+            "Cheap scope filter result. trace_id=%s decision=%s reason=%s",
+            request.trace_id,
+            scope_assessment.decision.value,
+            scope_assessment.reason,
+        )
         if scope_assessment.decision is ScopeDecision.OUT_OF_SCOPE:
+            logger.info(
+                "Query rejected by cheap scope filter. trace_id=%s",
+                request.trace_id,
+            )
             return QueryOrchestrationResult(
                 answer=self._build_out_of_scope_answer(),
                 sources=[],
@@ -209,35 +257,55 @@ class BasicQueryOrchestrator:
             )
 
         routing_decision = self._query_router.route(request.query)
+        logger.info(
+            "Routing decision accepted. trace_id=%s strategy=%s reason=%s confluence_query=%s space_key=%s router_tokens=%s",
+            request.trace_id,
+            routing_decision.strategy.value,
+            routing_decision.reason,
+            routing_decision.confluence_query,
+            routing_decision.space_key,
+            routing_decision.tokens_used,
+        )
         if routing_decision.strategy is RetrievalStrategy.OUT_OF_SCOPE:
+            logger.info(
+                "Query marked out of scope by LLM router. trace_id=%s",
+                request.trace_id,
+            )
             return QueryOrchestrationResult(
                 answer=self._build_out_of_scope_answer(),
                 sources=[],
                 tokens_used=routing_decision.tokens_used,
             )
 
-        if routing_decision.strategy in (
-            RetrievalStrategy.CONFLUENCE_ONLY,
-            RetrievalStrategy.BOTH,
-        ):
-            return QueryOrchestrationResult(
-                answer=self._build_pending_strategy_answer(routing_decision),
-                sources=[],
-                tokens_used=routing_decision.tokens_used,
+        context_chunks = self._collect_context(request.query, routing_decision, request.trace_id)
+        sources = self._build_sources(context_chunks)
+        logger.info(
+            "Context collection finished. trace_id=%s chunks=%s deduped_sources=%s",
+            request.trace_id,
+            len(context_chunks),
+            len(sources),
+        )
+
+        if not context_chunks:
+            logger.warning(
+                "Query finished with insufficient context. trace_id=%s strategy=%s",
+                request.trace_id,
+                routing_decision.strategy.value,
             )
-
-        chunks = self._retriever.retrieve(RetrievalRequest(query=request.query))
-        sources = self._build_sources(chunks)
-
-        if not chunks:
             return QueryOrchestrationResult(
                 answer=self._build_insufficient_context_answer(),
                 sources=[],
                 tokens_used=routing_decision.tokens_used,
             )
 
-        context_block = self._build_context_block(chunks)
-        context_strength = self._assess_context_strength(chunks)
+        context_block = self._build_context_block(context_chunks)
+        context_strength = self._assess_context_strength(context_chunks)
+        logger.info(
+            "Final answer generation starting. trace_id=%s context_strength=%s context_chars=%s",
+            request.trace_id,
+            context_strength.value,
+            len(context_block),
+        )
         llm_result = self._llm_client.generate_answer(
             LLMGenerationRequest(
                 system_prompt=self._build_system_prompt(),
@@ -252,11 +320,86 @@ class BasicQueryOrchestrator:
                 max_tokens=900,
             )
         )
-        return QueryOrchestrationResult(
+        result = QueryOrchestrationResult(
             answer=llm_result.answer,
             sources=sources,
             tokens_used=routing_decision.tokens_used + llm_result.tokens_used,
         )
+        logger.info(
+            "Query orchestration completed. trace_id=%s final_tokens=%s sources=%s",
+            request.trace_id,
+            result.tokens_used,
+            len(result.sources),
+        )
+        return result
+
+    def _collect_context(
+        self,
+        query: str,
+        routing_decision: RoutingDecision,
+        trace_id: str,
+    ) -> list[ContextChunk]:
+        context_chunks: list[ContextChunk] = []
+
+        if routing_decision.strategy in (
+            RetrievalStrategy.RAG_ONLY,
+            RetrievalStrategy.BOTH,
+        ):
+            logger.info(
+                "RAG retrieval started. trace_id=%s query_preview=%s",
+                trace_id,
+                _preview_text(query),
+            )
+            rag_chunks = self._retriever.retrieve(RetrievalRequest(query=query))
+            logger.info(
+                "RAG retrieval completed. trace_id=%s chunks=%s",
+                trace_id,
+                len(rag_chunks),
+            )
+            if rag_chunks:
+                logger.info(
+                    "RAG top results. trace_id=%s items=%s",
+                    trace_id,
+                    _preview_rag_chunks(rag_chunks),
+                )
+            context_chunks.extend(self._from_rag_chunks(rag_chunks))
+
+        if routing_decision.strategy in (
+            RetrievalStrategy.CONFLUENCE_ONLY,
+            RetrievalStrategy.BOTH,
+        ):
+            if self._confluence_client is None:
+                raise ValueError(
+                    "Confluence client is required for CONFLUENCE_ONLY or BOTH routing strategies."
+                )
+
+            effective_query = routing_decision.confluence_query or query
+            logger.info(
+                "Confluence retrieval started. trace_id=%s query=%s space_key=%s",
+                trace_id,
+                effective_query,
+                routing_decision.space_key,
+            )
+            confluence_pages = self._confluence_client.search(
+                ConfluenceSearchRequest(
+                    query=effective_query,
+                    space_key=routing_decision.space_key,
+                )
+            )
+            logger.info(
+                "Confluence retrieval completed. trace_id=%s pages=%s",
+                trace_id,
+                len(confluence_pages),
+            )
+            if confluence_pages:
+                logger.info(
+                    "Confluence top results. trace_id=%s items=%s",
+                    trace_id,
+                    _preview_confluence_pages(confluence_pages),
+                )
+            context_chunks.extend(self._from_confluence_pages(confluence_pages))
+
+        return context_chunks
 
     @staticmethod
     def _build_system_prompt() -> str:
@@ -266,9 +409,8 @@ class BasicQueryOrchestrator:
             "Tu funcion es analizar casos de uso y escenarios de negocio descritos en "
             "lenguaje natural, para asistir al equipo de arquitectura en la revision "
             "conceptual de propuestas de solucion.\n\n"
-            "Debes apoyarte unicamente en el contexto recuperado por el sistema, el cual "
-            "puede incluir building blocks arquitectonicos institucionales, lineamientos, "
-            "patrones, buenas practicas y referencias del marco BIAN.\n\n"
+            "Debes apoyarte unicamente en el contexto recuperado por el sistema. Ese contexto "
+            "puede provenir del corpus indexado en Azure AI Search y/o de paginas internas de Confluence.\n\n"
             "OBJETIVO DE LA RESPUESTA\n"
             "Debes ayudar a identificar:\n"
             "1. posibles building blocks reutilizables,\n"
@@ -279,6 +421,7 @@ class BasicQueryOrchestrator:
             "- No inventes informacion.\n"
             "- No asumas decisiones no sustentadas por el contexto disponible.\n"
             "- Si no existe suficiente informacion, indicalo explicitamente.\n"
+            "- Distingue cuando una conclusion proviene de lineamientos institucionales versus acuerdos internos recientes.\n"
             "- No proporciones detalles tecnicos de bajo nivel si no son relevantes para el analisis conceptual.\n"
             "- No expongas informacion sensible.\n\n"
             "MANEJO DE CONSULTAS FUERA DE ALCANCE\n"
@@ -340,15 +483,16 @@ class BasicQueryOrchestrator:
             "Instrucciones operativas:\n"
             "1. Usa solo el contexto recuperado.\n"
             "2. Si mencionas building blocks, patrones o referencias BIAN, deben aparecer en el contexto.\n"
-            "3. Si un punto no esta sustentado, indicalo como no confirmado.\n"
-            "4. Si el contexto es parcial o tangencial, evita recomendar un patron o building block especifico con falsa certeza.\n"
-            "5. En \"Fuentes consultadas\", cita por titulo las fuentes deduplicadas que realmente sustentan tu respuesta.\n"
-            "6. Usa Markdown limpio con encabezados `##` y listas con `-`.\n"
-            "7. Manten el formato exacto solicitado en el system prompt."
+            "3. Si mencionas acuerdos internos recientes, deben aparecer en el contexto de Confluence recuperado.\n"
+            "4. Si un punto no esta sustentado, indicalo como no confirmado.\n"
+            "5. Si el contexto es parcial o tangencial, evita recomendar un patron o building block especifico con falsa certeza.\n"
+            "6. En \"Fuentes consultadas\", cita por titulo las fuentes deduplicadas que realmente sustentan tu respuesta.\n"
+            "7. Usa Markdown limpio con encabezados `##` y listas con `-`.\n"
+            "8. Manten el formato exacto solicitado en el system prompt."
         )
 
     @staticmethod
-    def _build_context_block(chunks: list[SearchChunk]) -> str:
+    def _build_context_block(chunks: list[ContextChunk]) -> str:
         sections = []
         for index, chunk in enumerate(chunks, start=1):
             sections.append(
@@ -378,10 +522,10 @@ class BasicQueryOrchestrator:
                 "## 1. Resumen del caso",
                 cls.INSUFFICIENT_CONTEXT_MESSAGE,
                 "## 2. Hallazgos relevantes",
-                "- No se recuperaron fragmentos confiables desde Azure AI Search para sustentar la consulta.",
+                "- No se recuperaron fragmentos confiables desde las fuentes disponibles para sustentar la consulta.",
                 "## 3. Recomendaciones arquitectonicas",
                 "- Reformular la consulta con mas contexto de negocio o arquitectura.",
-                "- Indicar building blocks, capability domains, patrones o service domains esperados si se conocen.",
+                "- Indicar building blocks, capability domains, decisiones internas o service domains esperados si se conocen.",
                 "## 4. Posible alineamiento BIAN",
                 "- No es posible proponer un alineamiento BIAN sustentado con la evidencia recuperada.",
                 "## 5. Fuentes consultadas",
@@ -389,51 +533,13 @@ class BasicQueryOrchestrator:
             ]
         )
 
-    @classmethod
-    def _build_pending_strategy_answer(cls, decision: RoutingDecision) -> str:
-        if decision.strategy is RetrievalStrategy.CONFLUENCE_ONLY:
-            summary = (
-                "La consulta depende de documentacion interna o acuerdos recientes del equipo."
-            )
-            recommendation = (
-                "La estrategia requerida es CONFLUENCE_ONLY, pero la integracion real con Confluence aun no esta habilitada en T34A."
-            )
-        else:
-            summary = (
-                "La consulta combina lineamientos institucionales y documentacion interna reciente."
-            )
-            recommendation = (
-                "La estrategia requerida es BOTH, pero la integracion real con Confluence aun no esta habilitada en T34A."
-            )
-
-        return "\n\n".join(
-            [
-                "## 1. Resumen del caso",
-                summary,
-                "## 2. Hallazgos relevantes",
-                f"- Decision de routing: {decision.strategy.value}.",
-                f"- Razon del router: {decision.reason}",
-                "## 3. Recomendaciones arquitectonicas",
-                f"- {recommendation}",
-                "- Mantener el contrato actual del endpoint mientras se incorpora la estrategia completa en una tarea posterior.",
-                "## 4. Posible alineamiento BIAN",
-                "- No corresponde proponer alineamiento BIAN sin contexto recuperado.",
-                "## 5. Fuentes consultadas",
-                "- No se consultaron fuentes porque la estrategia depende de Confluence, aun no conectado.",
-            ]
-        )
-
     @staticmethod
-    def _assess_context_strength(chunks: list[SearchChunk]) -> ContextStrength:
+    def _assess_context_strength(chunks: list[ContextChunk]) -> ContextStrength:
         top_score = max(chunk.score for chunk in chunks)
-        return (
-            ContextStrength.STRONG
-            if top_score >= 0.72
-            else ContextStrength.PARTIAL
-        )
+        return ContextStrength.STRONG if top_score >= 0.72 else ContextStrength.PARTIAL
 
     @staticmethod
-    def _build_sources(chunks: list[SearchChunk]) -> list[QuerySource]:
+    def _build_sources(chunks: list[ContextChunk]) -> list[QuerySource]:
         deduped: dict[tuple[str, str, str], QuerySource] = {}
         for chunk in chunks:
             title = (chunk.title or "").strip()
@@ -462,3 +568,64 @@ class BasicQueryOrchestrator:
             key=lambda source: source.score,
             reverse=True,
         )
+
+    @staticmethod
+    def _from_rag_chunks(chunks: list[SearchChunk]) -> list[ContextChunk]:
+        return [
+            ContextChunk(
+                source_id=chunk.source_id,
+                source_type=chunk.source_type,
+                title=chunk.title or chunk.document_name or chunk.source_id,
+                content=chunk.content,
+                score=chunk.score,
+                source_url=chunk.source_url,
+                document_name=chunk.document_name,
+                knowledge_domain=chunk.knowledge_domain,
+            )
+            for chunk in chunks
+        ]
+
+    @staticmethod
+    def _from_confluence_pages(pages: list[ConfluencePage]) -> list[ContextChunk]:
+        return [
+            ContextChunk(
+                source_id=page.page_id,
+                source_type="confluence_page",
+                title=page.title,
+                content=page.content,
+                score=page.score,
+                source_url=page.url,
+                document_name=page.title,
+                knowledge_domain=(
+                    f"confluence:{page.space_key.lower()}"
+                    if page.space_key
+                    else "confluence"
+                ),
+            )
+            for page in pages
+        ]
+
+
+def _preview_text(value: str, limit: int = 120) -> str:
+    compact = " ".join(value.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
+
+
+def _preview_rag_chunks(chunks: list[SearchChunk], limit: int = 3) -> str:
+    previews = []
+    for chunk in chunks[:limit]:
+        previews.append(
+            f"{chunk.title or chunk.document_name or chunk.source_id} (score={chunk.score:.4f}, domain={chunk.knowledge_domain or 'n/a'})"
+        )
+    return " | ".join(previews)
+
+
+def _preview_confluence_pages(pages: list[ConfluencePage], limit: int = 3) -> str:
+    previews = []
+    for page in pages[:limit]:
+        previews.append(
+            f"{page.title} (score={page.score:.4f}, space={page.space_key or 'n/a'})"
+        )
+    return " | ".join(previews)

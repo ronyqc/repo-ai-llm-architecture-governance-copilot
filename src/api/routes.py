@@ -18,6 +18,10 @@ from src.core.llm_client import (
 )
 from src.core.orchestrator import BasicQueryOrchestrator, QueryOrchestrationRequest
 from src.core.routing import QueryRoutingError
+from src.integrations.confluence_client import (
+    ConfluenceConfigurationError,
+    ConfluenceError,
+)
 from src.rag.embeddings import (
     AzureOpenAIEmbeddingConfigurationError,
     AzureOpenAIEmbeddingError,
@@ -80,6 +84,13 @@ def query_copilot(
             detail="Streaming is not supported in the current /query implementation.",
         )
 
+    logger.info(
+        "Query request received. trace_id=%s session_id=%s query_preview=%s",
+        trace_id,
+        session_id,
+        " ".join(payload.query.split())[:120],
+    )
+
     try:
         result = orchestrator.answer(
             QueryOrchestrationRequest(
@@ -91,6 +102,7 @@ def query_copilot(
         AzureOpenAIEmbeddingConfigurationError,
         AzureSearchConfigurationError,
         AzureOpenAILLMConfigurationError,
+        ConfluenceConfigurationError,
     ) as exc:
         logger.exception("Query endpoint misconfigured. trace_id=%s", trace_id)
         raise HTTPException(
@@ -102,6 +114,7 @@ def query_copilot(
         AzureSearchQueryError,
         AzureOpenAILLMError,
         QueryRoutingError,
+        ConfluenceError,
     ) as exc:
         logger.exception("Query execution failed. trace_id=%s", trace_id)
         raise HTTPException(
@@ -116,6 +129,14 @@ def query_copilot(
         ) from exc
 
     latency_ms = (perf_counter() - start_time) * 1000
+    logger.info(
+        "Query request completed. trace_id=%s session_id=%s tokens_used=%s sources=%s latency_ms=%.2f",
+        trace_id,
+        session_id,
+        result.tokens_used,
+        len(result.sources),
+        latency_ms,
+    )
 
     return QueryResponse(
         answer=result.answer,

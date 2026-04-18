@@ -11,6 +11,7 @@ from src.core.orchestrator import (
     QueryOrchestrationResult,
     QuerySource,
 )
+from src.integrations.confluence_client import ConfluenceError
 from src.security.auth import AuthenticatedUser, require_authenticated_user
 
 
@@ -94,6 +95,22 @@ class QueryEndpointTests(unittest.TestCase):
         self.assertEqual(
             response.json()["detail"],
             "Authorization token is required.",
+        )
+
+    def test_query_endpoint_returns_503_when_confluence_fails(self) -> None:
+        orchestrator = Mock()
+        orchestrator.answer.side_effect = ConfluenceError("Confluence request failed.")
+        app.dependency_overrides[get_query_orchestrator] = lambda: orchestrator
+
+        response = self.client.post(
+            "/api/v1/query",
+            json={"query": "Existe alguna decision interna reciente sobre pagos?"},
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["detail"],
+            "Query processing is temporarily unavailable.",
         )
 
 

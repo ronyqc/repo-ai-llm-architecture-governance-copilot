@@ -12,10 +12,13 @@ from src.core.routing import (
 
 
 class LLMQueryRouterTests(unittest.TestCase):
-    def test_route_returns_structured_decision(self) -> None:
+    def test_route_returns_structured_decision_with_confluence_hints(self) -> None:
         llm_client = Mock()
         llm_client.generate_answer.return_value = LLMGenerationResult(
-            answer='{"strategy":"RAG_ONLY","reason":"La consulta busca building blocks del corpus indexado."}',
+            answer=(
+                '{"strategy":"CONFLUENCE_ONLY","reason":"La consulta apunta a decisiones internas recientes.",'
+                '"confluence_query":"orquestacion de pagos decisiones internas","space_key":"AGC"}'
+            ),
             tokens_used=14,
             finish_reason="stop",
         )
@@ -25,19 +28,24 @@ class LLMQueryRouterTests(unittest.TestCase):
             max_tokens=120,
         )
 
-        decision = router.route("Que building blocks aplicar para autenticacion?")
+        decision = router.route("Existe alguna decision interna reciente sobre orquestacion de pagos?")
 
-        self.assertEqual(decision.strategy, RetrievalStrategy.RAG_ONLY)
+        self.assertEqual(decision.strategy, RetrievalStrategy.CONFLUENCE_ONLY)
         self.assertEqual(
             decision.reason,
-            "La consulta busca building blocks del corpus indexado.",
+            "La consulta apunta a decisiones internas recientes.",
         )
+        self.assertEqual(
+            decision.confluence_query,
+            "orquestacion de pagos decisiones internas",
+        )
+        self.assertEqual(decision.space_key, "AGC")
         self.assertEqual(decision.tokens_used, 14)
 
     def test_route_raises_when_llm_returns_invalid_json(self) -> None:
         llm_client = Mock()
         llm_client.generate_answer.return_value = LLMGenerationResult(
-            answer="RAG_ONLY",
+            answer="CONFLUENCE_ONLY",
             tokens_used=9,
             finish_reason="stop",
         )
