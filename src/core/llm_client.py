@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any
+from urllib import error, parse, request
 
 try:
     from openai import AzureOpenAI
@@ -121,6 +123,45 @@ class AzureOpenAILLMClient:
             tokens_used=tokens_used,
             finish_reason=getattr(choice, "finish_reason", None),
         )
+
+    def check_health(self, timeout_seconds: float) -> None:
+        query = parse.urlencode({"api-version": self._api_version})
+        encoded_deployment = parse.quote(self._deployment, safe="")
+        url = (
+            f"{self._endpoint}/openai/deployments/{encoded_deployment}/chat/completions"
+            f"?{query}"
+        )
+        payload = json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "health"}
+                ],
+                "max_tokens": 1,
+                "temperature": 0,
+            }
+        ).encode("utf-8")
+        req = request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "api-key": self._api_key,
+            },
+            data=payload,
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=timeout_seconds) as response:
+                if int(getattr(response, "status", 200) or 200) >= 400:
+                    raise AzureOpenAILLMError(
+                        "Azure OpenAI health check returned an unexpected status."
+                    )
+        except error.HTTPError as exc:
+            raise AzureOpenAILLMError(
+                f"Azure OpenAI health check failed with status {exc.code}."
+            ) from exc
+        except error.URLError as exc:
+            raise AzureOpenAILLMError("Azure OpenAI health check failed.") from exc
 
     def _validate_configuration(self) -> None:
         missing = []

@@ -163,6 +163,20 @@ class ConfluenceCloudClient:
         logger.info("Confluence search completed. pages=%s", len(pages))
         return pages
 
+    def check_health(self, timeout_seconds: float) -> None:
+        if self._default_space_key:
+            encoded_space = parse.quote(self._default_space_key, safe="")
+            self._request_json(
+                f"/wiki/rest/api/space/{encoded_space}",
+                timeout_seconds=timeout_seconds,
+            )
+            return
+
+        self._request_json(
+            "/wiki/rest/api/space?limit=1",
+            timeout_seconds=timeout_seconds,
+        )
+
     def _build_cql(self, *, query: str, space_key: str | None) -> str:
         normalized_query = query.strip()
         if not normalized_query:
@@ -174,7 +188,12 @@ class ConfluenceCloudClient:
             clauses.append(f'space = "{space_key}"')
         return " AND ".join(clauses) + " ORDER BY lastmodified DESC"
 
-    def _request_json(self, path: str) -> dict[str, Any]:
+    def _request_json(
+        self,
+        path: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         url = f"{self._base_url}{path}"
         logger.info("Confluence request. url=%s", url)
         req = request.Request(
@@ -185,7 +204,11 @@ class ConfluenceCloudClient:
             },
         )
         try:
-            with self._opener.open(req) as response:
+            if timeout_seconds is None:
+                response_context = self._opener.open(req)
+            else:
+                response_context = self._opener.open(req, timeout=timeout_seconds)
+            with response_context as response:
                 raw = response.read().decode("utf-8")
         except error.HTTPError as exc:
             logger.error("Confluence HTTP error. url=%s status=%s", url, exc.code)

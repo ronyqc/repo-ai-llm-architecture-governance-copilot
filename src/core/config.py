@@ -81,6 +81,10 @@ class Settings:
         "AZURE_SEARCH_ENDPOINT",
         "https://localhost-search.search.windows.net",
     )
+    AZURE_SEARCH_API_VERSION: str = _get_env(
+        "AZURE_SEARCH_API_VERSION",
+        "2024-07-01",
+    )
     AZURE_SEARCH_KEY: str = _get_env("AZURE_SEARCH_KEY", "dev-search-key")
     AZURE_SEARCH_INDEX: str = _get_env(
         "AZURE_SEARCH_INDEX",
@@ -115,6 +119,10 @@ class Settings:
     CONFLUENCE_API_TOKEN: str = _get_env("CONFLUENCE_API_TOKEN")
     CONFLUENCE_DEFAULT_SPACE_KEY: str = _get_env("CONFLUENCE_DEFAULT_SPACE_KEY")
     CONFLUENCE_SEARCH_TOP_K: int = _get_env_int("CONFLUENCE_SEARCH_TOP_K", 3)
+    HEALTHCHECK_TIMEOUT_SECONDS: float = _get_env_float(
+        "HEALTHCHECK_TIMEOUT_SECONDS",
+        3.0,
+    )
     AZURE_TENANT_ID: str = _get_env("AZURE_TENANT_ID")
     AZURE_CLIENT_ID: str = _get_env("AZURE_CLIENT_ID")
     AZURE_API_AUDIENCE: str = _get_env("AZURE_API_AUDIENCE")

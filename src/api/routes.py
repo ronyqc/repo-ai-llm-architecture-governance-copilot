@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from time import perf_counter
 from uuid import uuid4
 
@@ -12,6 +11,7 @@ from src.api.schemas import (
     SourceReference,
 )
 from src.core.config import settings
+from src.core.health import SystemHealthService
 from src.core.llm_client import (
     AzureOpenAILLMConfigurationError,
     AzureOpenAILLMError,
@@ -51,20 +51,19 @@ def get_query_orchestrator() -> BasicQueryOrchestrator:
     return BasicQueryOrchestrator.from_settings()
 
 
+def get_health_service() -> SystemHealthService:
+    return SystemHealthService.from_settings()
+
+
 @router.get("/api/v1/health")
-def health_check() -> dict[str, object]:
-    timestamp = (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+def health_check(
+    health_service: SystemHealthService = Depends(get_health_service),
+) -> dict[str, object]:
+    report = health_service.check()
     return {
-        "status": "healthy",
-        "components": {
-            "backend": "healthy",
-        },
-        "timestamp": timestamp,
+        "status": report.status,
+        "components": report.components,
+        "timestamp": report.timestamp,
     }
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib import error, parse, request
 
 try:
     from azure.core.credentials import AzureKeyCredential
@@ -142,6 +143,33 @@ class AzureSearchVectorStore:
             query.score_threshold,
         )
         return normalized_results
+
+    def check_health(self, timeout_seconds: float) -> None:
+        api_version = settings.AZURE_SEARCH_API_VERSION
+        encoded_index = parse.quote(self._index_name, safe="")
+        url = (
+            f"{self._endpoint}/indexes('{encoded_index}')"
+            f"?{parse.urlencode({'api-version': api_version})}"
+        )
+        req = request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "api-key": self._api_key,
+            },
+        )
+        try:
+            with request.urlopen(req, timeout=timeout_seconds) as response:
+                if int(getattr(response, "status", 200) or 200) >= 400:
+                    raise AzureSearchQueryError(
+                        "Azure AI Search health check returned an unexpected status."
+                    )
+        except error.HTTPError as exc:
+            raise AzureSearchQueryError(
+                f"Azure AI Search health check failed with status {exc.code}."
+            ) from exc
+        except error.URLError as exc:
+            raise AzureSearchQueryError("Azure AI Search health check failed.") from exc
 
     def _validate_configuration(self) -> None:
         missing = []
