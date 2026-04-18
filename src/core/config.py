@@ -95,6 +95,9 @@ class Settings:
         "AZURE_SEARCH_SCORE_THRESHOLD",
         0.2,  # Avoid 0.0 so low-signal keyword matches do not pass by default.
     )
+    # Temporary backward-compatibility settings kept after T34A/T34B.
+    # The semantic retrieval precheck is no longer used for routing decisions,
+    # but these env vars remain documented to avoid breaking existing local envs.
     AZURE_SEARCH_PRECHECK_TOP_K: int = _get_env_int(
         "AZURE_SEARCH_PRECHECK_TOP_K",
         1,
@@ -107,6 +110,11 @@ class Settings:
         "AZURE_STORAGE_CONNECTION_STRING",
         "UseDevelopmentStorage=true",
     )
+    CONFLUENCE_BASE_URL: str = _get_env("CONFLUENCE_BASE_URL")
+    CONFLUENCE_EMAIL: str = _get_env("CONFLUENCE_EMAIL")
+    CONFLUENCE_API_TOKEN: str = _get_env("CONFLUENCE_API_TOKEN")
+    CONFLUENCE_DEFAULT_SPACE_KEY: str = _get_env("CONFLUENCE_DEFAULT_SPACE_KEY")
+    CONFLUENCE_SEARCH_TOP_K: int = _get_env_int("CONFLUENCE_SEARCH_TOP_K", 3)
     AZURE_TENANT_ID: str = _get_env("AZURE_TENANT_ID")
     AZURE_CLIENT_ID: str = _get_env("AZURE_CLIENT_ID")
     AZURE_API_AUDIENCE: str = _get_env("AZURE_API_AUDIENCE")
