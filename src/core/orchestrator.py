@@ -320,8 +320,12 @@ class BasicQueryOrchestrator:
                 max_tokens=900,
             )
         )
+        guarded_answer = self._apply_output_guardrails(
+            llm_result.answer,
+            trace_id=request.trace_id,
+        )
         result = QueryOrchestrationResult(
-            answer=llm_result.answer,
+            answer=guarded_answer,
             sources=sources,
             tokens_used=routing_decision.tokens_used + llm_result.tokens_used,
         )
@@ -532,6 +536,26 @@ class BasicQueryOrchestrator:
                 "- No se encontraron fuentes relevantes en el contexto recuperado.",
             ]
         )
+
+    @classmethod
+    def _apply_output_guardrails(cls, answer: str, *, trace_id: str) -> str:
+        normalized_answer = answer.strip()
+        if not normalized_answer:
+            logger.warning(
+                "Output guardrail triggered: empty final answer. trace_id=%s",
+                trace_id,
+            )
+            return cls._build_insufficient_context_answer()
+
+        if any(character.isalnum() for character in normalized_answer):
+            return normalized_answer
+
+        logger.warning(
+            "Output guardrail triggered: non-textual final answer. trace_id=%s answer_preview=%s",
+            trace_id,
+            _preview_text(normalized_answer),
+        )
+        return cls._build_insufficient_context_answer()
 
     @staticmethod
     def _assess_context_strength(chunks: list[ContextChunk]) -> ContextStrength:

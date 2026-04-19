@@ -21,6 +21,10 @@ class AzureOpenAILLMError(RuntimeError):
     """Raised when Azure OpenAI fails to generate an answer."""
 
 
+class AzureOpenAIContentFilterError(AzureOpenAILLMError):
+    """Raised when Azure OpenAI rejects a prompt due to content filtering."""
+
+
 @dataclass(frozen=True)
 class LLMGenerationRequest:
     """Stable input contract for the LLM answer generation step."""
@@ -106,6 +110,10 @@ class AzureOpenAILLMClient:
                 max_tokens=normalized_request.max_tokens,
             )
         except Exception as exc:  # pragma: no cover - SDK-specific failures
+            if self._is_content_filter_error(exc):
+                raise AzureOpenAIContentFilterError(
+                    "La consulta fue rechazada por las politicas de seguridad del modelo."
+                ) from exc
             raise AzureOpenAILLMError(
                 "Azure OpenAI answer generation failed."
             ) from exc
@@ -195,4 +203,39 @@ class AzureOpenAILLMClient:
             user_prompt=request.user_prompt.strip(),
             temperature=request.temperature,
             max_tokens=request.max_tokens,
+        )
+
+    @staticmethod
+    def _is_content_filter_error(exc: Exception) -> bool:
+        response = getattr(exc, "response", None)
+        if response is None:
+            return False
+
+        status_code = getattr(response, "status_code", None)
+        if status_code != 400:
+            return False
+
+        payload = getattr(response, "json", None)
+        if not callable(payload):
+            return False
+
+        try:
+            body = payload()
+        except Exception:
+            return False
+
+        error_payload = body.get("error", {}) if isinstance(body, dict) else {}
+        error_code = str(error_payload.get("code", "")).strip().lower()
+        inner_error = error_payload.get("innererror", {})
+        inner_code = str(inner_error.get("code", "")).strip().lower()
+        content_filter_result = inner_error.get("content_filter_result", {})
+        jailbreak_detected = bool(
+            isinstance(content_filter_result, dict)
+            and isinstance(content_filter_result.get("jailbreak"), dict)
+            and content_filter_result["jailbreak"].get("detected")
+        )
+        return (
+            error_code == "content_filter"
+            or inner_code == "responsibleaipolicyviolation"
+            or jailbreak_detected
         )

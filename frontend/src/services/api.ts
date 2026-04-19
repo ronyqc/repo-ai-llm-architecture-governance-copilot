@@ -72,8 +72,27 @@ export async function apiPost<T>(
   });
 
   if (!response.ok) {
-    throw new Error(`POST ${path} failed with status ${response.status}`);
+    const errorMessage = await extractErrorMessage(response);
+    throw new Error(errorMessage ?? `POST ${path} failed with status ${response.status}`);
   }
 
   return response.json() as Promise<T>;
+}
+
+async function extractErrorMessage(response: Response): Promise<string | null> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return null;
+  }
+
+  try {
+    const payload = (await response.json()) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return payload.detail.trim();
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
