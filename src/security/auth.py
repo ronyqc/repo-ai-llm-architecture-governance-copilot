@@ -241,16 +241,48 @@ def require_authenticated_user(
 def require_admin_user(
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> AuthenticatedUser:
+    return _ensure_admin_access(user)
+
+
+def require_ingest_user(
+    user: AuthenticatedUser = Depends(require_authenticated_user),
+) -> AuthenticatedUser:
+    if not settings.REQUIRE_ADMIN_FOR_INGEST:
+        return user
+
+    return _ensure_admin_access(user)
+
+
+def _ensure_admin_access(user: AuthenticatedUser) -> AuthenticatedUser:
     normalized_roles = {role.lower() for role in user.roles}
-    if "admin" not in normalized_roles:
+    normalized_admin_roles = {
+        role.lower()
+        for role in settings.INGEST_ADMIN_ROLES
+        if role.strip()
+    }
+    normalized_scopes = {
+        scope.lower()
+        for scope in user.claims.get("scp", [])
+        if isinstance(scope, str) and scope.strip()
+    }
+    normalized_admin_scopes = {
+        scope.lower()
+        for scope in settings.INGEST_ADMIN_SCOPES
+        if scope.strip()
+    }
+
+    has_admin_role = bool(normalized_roles & normalized_admin_roles)
+    has_admin_scope = bool(normalized_scopes & normalized_admin_scopes)
+    if not has_admin_role and not has_admin_scope:
         logger.warning(
-            "Request rejected: admin role required. user_id=%s roles=%s",
+            "Request rejected: admin role or scope required. user_id=%s roles=%s scopes=%s",
             user.user_id,
             user.roles,
+            user.claims.get("scp", []),
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin role is required for this operation.",
+            detail="Admin role or scope is required for this operation.",
         )
 
     return user

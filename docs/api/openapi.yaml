@@ -72,7 +72,7 @@ paths:
 
   /api/v1/ingest:
     post:
-      summary: Registrar una solicitud de ingesta
+      summary: Registrar una solicitud administrativa de ingesta
       operationId: ingestDocument
       security:
         - BearerAuth: []
@@ -83,22 +83,22 @@ paths:
             schema:
               $ref: "#/components/schemas/IngestRequest"
             example:
-              file_name: "architecture-guidelines.pdf"
-              file_url: "https://example.com/docs/architecture-guidelines.pdf"
-              knowledge_domain: "architecture-governance"
+              file_name: "architecture-guidelines.md"
+              file_url: "blob://documents-raw/guidelines/architecture-guidelines.md"
+              knowledge_domain: "guidelines_patterns"
               metadata:
-                source: "sharepoint"
+                source_system: "sharepoint"
                 owner: "enterprise-architecture"
       responses:
-        "200":
-          description: Ingesta registrada correctamente
+        "202":
+          description: Ingesta aceptada y despachada al pipeline por Blob Trigger
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/IngestResponse"
               example:
                 status: accepted
-                message: "Ingesta registrada correctamente"
+                message: "Ingest accepted and dispatched to the blob-trigger pipeline."
                 trace_id: "550e8400-e29b-41d4-a716-446655440002"
         "400":
           description: Solicitud invalida
@@ -106,10 +106,12 @@ paths:
           description: No autenticado
         "403":
           description: Acceso denegado
+        "404":
+          description: Archivo referenciado no encontrado
+        "409":
+          description: Conflicto al despachar el blob de ingesta
         "422":
           description: Error de validacion
-        "503":
-          description: Servicio no disponible
 
 components:
   securitySchemes:
@@ -201,7 +203,7 @@ components:
     IngestRequest:
       type: object
       additionalProperties: false
-      description: Cuerpo de la solicitud para registrar una ingesta.
+      description: Cuerpo de la solicitud para registrar una ingesta administrativa sobre un archivo ya cargado en Blob Storage.
       properties:
         file_name:
           type: string
@@ -210,23 +212,22 @@ components:
         file_url:
           type: string
           minLength: 1
-          description: URL desde donde se puede obtener el archivo.
+          description: Referencia al blob ya existente usando `blob://` o URL HTTPS de Azure Blob Storage.
         knowledge_domain:
           type: string
           minLength: 1
           description: Dominio de conocimiento asociado al archivo.
         metadata:
-          type:
-            - object
-            - "null"
-          description: Metadatos opcionales asociados a la solicitud de ingesta.
+          type: object
+          minProperties: 1
+          description: Metadatos estructurados asociados a la solicitud de ingesta.
           additionalProperties:
             type: string
-          default: null
       required:
         - file_name
         - file_url
         - knowledge_domain
+        - metadata
 
     IngestResponse:
       type: object

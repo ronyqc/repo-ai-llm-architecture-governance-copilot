@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -53,13 +55,17 @@ class IngestRequest(BaseModel):
         min_length=1,
         description="Knowledge domain associated with the file",
     )
-    metadata: dict[str, str] | None = Field(
-        default=None,
-        description="Optional metadata associated with the ingestion request",
+    metadata: dict[str, str] = Field(
+        ...,
+        min_length=1,
+        description="Metadata associated with the ingestion request",
     )
 
 
 class IngestResponse(BaseModel):
-    status: str = Field(..., description="Status of the ingestion request")
+    status: Literal["accepted"] = Field(
+        ...,
+        description="Status of the ingestion request",
+    )
     message: str = Field(..., description="Result message for the ingestion request")
     trace_id: str = Field(..., description="Trace identifier for observability")
