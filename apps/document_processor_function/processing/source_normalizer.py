@@ -10,6 +10,8 @@ SUPPORTED_SOURCE_TYPES = {
     "markdown_curated",
     "plain_text",
     "html_page",
+    "pdf_document",
+    "docx_document",
 }
 
 
@@ -46,6 +48,22 @@ def normalize_source(
             knowledge_domain=knowledge_domain,
             document_name=document_name,
             source_url=source_url,
+        )
+    elif source_type == "pdf_document":
+        normalized = _normalize_text_document(
+            raw_content=raw_content,
+            knowledge_domain=knowledge_domain,
+            document_name=document_name,
+            source_url=source_url,
+            source_type="pdf_document",
+        )
+    elif source_type == "docx_document":
+        normalized = _normalize_text_document(
+            raw_content=raw_content,
+            knowledge_domain=knowledge_domain,
+            document_name=document_name,
+            source_url=source_url,
+            source_type="docx_document",
         )
     else:
         normalized = _normalize_html_page(
@@ -92,13 +110,35 @@ def _normalize_plain_text(
     document_name: str,
     source_url: str | None,
 ) -> dict:
+    return _normalize_text_document(
+        raw_content=raw_content,
+        knowledge_domain=knowledge_domain,
+        document_name=document_name,
+        source_url=source_url,
+        source_type="plain_text",
+    )
+
+
+def _normalize_text_document(
+    raw_content: str,
+    knowledge_domain: str,
+    document_name: str,
+    source_url: str | None,
+    source_type: str,
+) -> dict:
+    metadata = {
+        "content_type": source_type,
+    }
+    if source_url:
+        metadata["source_url"] = source_url
+
     return {
         "title": document_name,
         "knowledge_domain": knowledge_domain,
-        "source_type": "plain_text",
+        "source_type": source_type,
         "document_name": document_name,
         "source_url": source_url,
-        "metadata": "{}",
+        "metadata": json.dumps(metadata, ensure_ascii=False),
         "content": raw_content,
     }
 

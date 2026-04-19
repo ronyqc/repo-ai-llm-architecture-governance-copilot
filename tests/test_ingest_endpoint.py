@@ -22,8 +22,8 @@ class IngestEndpointTests(unittest.TestCase):
         self.ingest_service = Mock()
         self.ingest_service.ingest.return_value = IngestExecutionResult(
             trace_id="trace-from-service",
-            destination_blob_url="https://example.blob.core.windows.net/documents/admin-ingest/guidelines_patterns/trace/doc.md",
-            destination_blob_name="admin-ingest/guidelines_patterns/trace/doc.md",
+            destination_blob_url="https://example.blob.core.windows.net/documents/admin-ingest/doc.md",
+            destination_blob_name="admin-ingest/doc.md",
         )
         app.dependency_overrides[require_authenticated_user] = lambda: AuthenticatedUser(
             user_id="admin-user",
@@ -92,17 +92,17 @@ class IngestEndpointTests(unittest.TestCase):
 
     def test_ingest_rejects_invalid_knowledge_domain(self) -> None:
         self.ingest_service.ingest.side_effect = IngestValidationError(
-            "Invalid knowledge_domain. Allowed values: bian, building_blocks, guidelines_patterns."
+            "knowledge_domain no es válido. Valores permitidos: bian, building_blocks, guidelines_patterns."
         )
 
         response = self.client.post("/api/v1/ingest", json=self._valid_payload())
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Invalid knowledge_domain", response.json()["detail"])
+        self.assertIn("knowledge_domain no es válido", response.json()["detail"])
 
     def test_ingest_rejects_missing_blob_reference(self) -> None:
         self.ingest_service.ingest.side_effect = IngestNotFoundError(
-            "Referenced file was not found in Azure Blob Storage."
+            "El archivo referenciado no fue encontrado en Azure Blob Storage."
         )
 
         response = self.client.post("/api/v1/ingest", json=self._valid_payload())
@@ -110,7 +110,7 @@ class IngestEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(
             response.json()["detail"],
-            "Referenced file was not found in Azure Blob Storage.",
+            "El archivo referenciado no fue encontrado en Azure Blob Storage.",
         )
 
     def test_ingest_returns_accepted_with_valid_reference(self) -> None:

@@ -123,7 +123,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
             payload=b"# Architecture Guidelines",
         )
         destination_blob = _FakeBlobClient(
-            url="https://account.blob.core.windows.net/documents-processed/admin-ingest/guidelines_patterns/trace-123/architecture-guidelines.md"
+            url="https://account.blob.core.windows.net/documents-processed/admin-ingest/architecture-guidelines.md"
         )
         self.blob_service.add_blob_client(
             container="documents-raw",
@@ -132,7 +132,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
         )
         self.blob_service.add_blob_client(
             container="documents-processed",
-            blob="admin-ingest/guidelines_patterns/trace-123/architecture-guidelines.md",
+            blob="admin-ingest/architecture-guidelines.md",
             client=destination_blob,
         )
 
@@ -144,7 +144,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
 
         self.assertEqual(
             result.destination_blob_name,
-            "admin-ingest/guidelines_patterns/trace-123/architecture-guidelines.md",
+            "admin-ingest/architecture-guidelines.md",
         )
         self.assertEqual(len(destination_blob.upload_calls), 1)
         upload_call = destination_blob.upload_calls[0]
@@ -168,7 +168,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
                 trace_id="trace-123",
             )
 
-        self.assertIn("Invalid knowledge_domain", str(context.exception))
+        self.assertIn("knowledge_domain no es", str(context.exception))
 
     def test_ingest_rejects_nonexistent_blob(self) -> None:
         missing_blob = _FakeBlobClient(
@@ -176,7 +176,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
             exists=False,
         )
         destination_blob = _FakeBlobClient(
-            url="https://account.blob.core.windows.net/documents-processed/admin-ingest/guidelines_patterns/trace-123/architecture-guidelines.md"
+            url="https://account.blob.core.windows.net/documents-processed/admin-ingest/architecture-guidelines.md"
         )
         self.blob_service.add_blob_client(
             container="documents-raw",
@@ -185,7 +185,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
         )
         self.blob_service.add_blob_client(
             container="documents-processed",
-            blob="admin-ingest/guidelines_patterns/trace-123/architecture-guidelines.md",
+            blob="admin-ingest/architecture-guidelines.md",
             client=destination_blob,
         )
 
@@ -198,7 +198,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
 
         self.assertEqual(
             str(context.exception),
-            "Referenced file was not found in Azure Blob Storage.",
+            "El archivo referenciado no fue encontrado en Azure Blob Storage.",
         )
 
     def test_ingest_rejects_mismatched_file_name(self) -> None:
@@ -211,21 +211,51 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
 
         self.assertEqual(
             str(context.exception),
-            "file_name must match the file referenced by file_url.",
+            "file_name debe coincidir con el archivo referenciado por file_url.",
         )
+
+    def test_ingest_accepts_pdf_extension(self) -> None:
+        source_blob = _FakeBlobClient(
+            url="https://account.blob.core.windows.net/documents-raw/guidelines/architecture-guidelines.pdf",
+            payload=b"%PDF-1.4 fake",
+        )
+        destination_blob = _FakeBlobClient(
+            url="https://account.blob.core.windows.net/documents-processed/admin-ingest/architecture-guidelines.pdf"
+        )
+        self.blob_service.add_blob_client(
+            container="documents-raw",
+            blob="guidelines/architecture-guidelines.pdf",
+            client=source_blob,
+        )
+        self.blob_service.add_blob_client(
+            container="documents-processed",
+            blob="admin-ingest/architecture-guidelines.pdf",
+            client=destination_blob,
+        )
+
+        result = self.service.ingest(
+            payload=self._payload(
+                file_name="architecture-guidelines.pdf",
+                file_url="blob://documents-raw/guidelines/architecture-guidelines.pdf",
+            ),
+            user=self.user,
+            trace_id="trace-123",
+        )
+
+        self.assertEqual(result.destination_blob_name, "admin-ingest/architecture-guidelines.pdf")
 
     def test_ingest_rejects_unsupported_file_extension(self) -> None:
         with self.assertRaises(IngestValidationError) as context:
             self.service.ingest(
                 payload=self._payload(
-                    file_name="architecture-guidelines.pdf",
-                    file_url="blob://documents-raw/guidelines/architecture-guidelines.pdf",
+                    file_name="architecture-guidelines.xlsx",
+                    file_url="blob://documents-raw/guidelines/architecture-guidelines.xlsx",
                 ),
                 user=self.user,
                 trace_id="trace-123",
             )
 
-        self.assertIn("Unsupported file type", str(context.exception))
+        self.assertIn("no está soportado", str(context.exception))
 
     def test_ingest_raises_conflict_when_destination_blob_already_exists(self) -> None:
         source_blob = _FakeBlobClient(
@@ -233,7 +263,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
             payload=b"# Architecture Guidelines",
         )
         destination_blob = _FakeBlobClient(
-            url="https://account.blob.core.windows.net/documents-processed/admin-ingest/guidelines_patterns/trace-123/architecture-guidelines.md",
+            url="https://account.blob.core.windows.net/documents-processed/admin-ingest/architecture-guidelines.md",
             fail_on_upload=ResourceExistsError("already exists"),
         )
         self.blob_service.add_blob_client(
@@ -243,7 +273,7 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
         )
         self.blob_service.add_blob_client(
             container="documents-processed",
-            blob="admin-ingest/guidelines_patterns/trace-123/architecture-guidelines.md",
+            blob="admin-ingest/architecture-guidelines.md",
             client=destination_blob,
         )
 
