@@ -69,3 +69,30 @@ class IngestResponse(BaseModel):
     )
     message: str = Field(..., description="Result message for the ingestion request")
     trace_id: str = Field(..., description="Trace identifier for observability")
+
+
+class UploadUrlRequest(BaseModel):
+    file_name: str = Field(
+        ...,
+        min_length=1,
+        description="Original file name to be uploaded to raw storage",
+    )
+
+
+class UploadUrlResponse(BaseModel):
+    upload_url: str = Field(
+        ...,
+        description="Temporary SAS URL for direct blob upload",
+    )
+    blob_url: str = Field(
+        ...,
+        description="Logical URL of the target blob without SAS",
+    )
+    blob_name: str = Field(
+        ...,
+        description="Target blob name inside the raw upload container",
+    )
+    expires_in_seconds: int = Field(
+        ...,
+        description="Lifetime of the SAS URL in seconds",
+    )

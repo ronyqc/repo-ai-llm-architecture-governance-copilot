@@ -9,6 +9,8 @@ from src.api.schemas import (
     QueryRequest,
     QueryResponse,
     SourceReference,
+    UploadUrlRequest,
+    UploadUrlResponse,
 )
 from src.core.health import SystemHealthService
 from src.core.llm_client import (
@@ -21,6 +23,10 @@ from src.core.routing import QueryRoutingError
 from src.integrations.blob_ingest_service import (
     BlobDocumentIngestService,
     IngestServiceError,
+)
+from src.integrations.blob_upload_service import (
+    BlobUploadUrlService,
+    UploadUrlServiceError,
 )
 from src.integrations.confluence_client import (
     ConfluenceConfigurationError,
@@ -36,6 +42,7 @@ from src.rag.vector_store import (
 )
 from src.security.auth import (
     AuthenticatedUser,
+    require_admin_user,
     require_authenticated_user,
     require_ingest_user,
 )
@@ -65,6 +72,10 @@ def get_guardrail_service() -> GuardrailService:
 
 def get_ingest_service() -> BlobDocumentIngestService:
     return BlobDocumentIngestService.from_settings()
+
+
+def get_blob_upload_service() -> BlobUploadUrlService:
+    return BlobUploadUrlService.from_settings()
 
 
 @router.get("/api/v1/health")
@@ -200,6 +211,37 @@ def query_copilot(
         latency_ms=latency_ms,
         trace_id=trace_id,
         session_id=session_id,
+    )
+
+
+@router.post(
+    "/api/v1/upload-url",
+    response_model=UploadUrlResponse,
+)
+def create_upload_url(
+    payload: UploadUrlRequest,
+    upload_service: BlobUploadUrlService = Depends(get_blob_upload_service),
+    user: AuthenticatedUser = Depends(require_admin_user),
+) -> UploadUrlResponse:
+    try:
+        result = upload_service.generate_upload_url(file_name=payload.file_name)
+    except UploadUrlServiceError as exc:
+        logger.warning(
+            "Upload URL request rejected. user_id=%s file_name=%s error=%s",
+            user.user_id,
+            payload.file_name,
+            str(exc),
+        )
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=str(exc),
+        ) from exc
+
+    return UploadUrlResponse(
+        upload_url=result.upload_url,
+        blob_url=result.blob_url,
+        blob_name=result.blob_name,
+        expires_in_seconds=result.expires_in_seconds,
     )
 
 

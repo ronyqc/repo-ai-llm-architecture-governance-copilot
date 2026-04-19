@@ -125,6 +125,14 @@ class Settings:
         "AZURE_STORAGE_CONNECTION_STRING",
         "UseDevelopmentStorage=true",
     )
+    RAW_UPLOAD_CONTAINER_NAME: str = _get_env(
+        "RAW_UPLOAD_CONTAINER_NAME",
+        "raw-corpus",
+    )
+    UPLOAD_URL_EXPIRATION_SECONDS: int = _get_env_int(
+        "UPLOAD_URL_EXPIRATION_SECONDS",
+        900,
+    )
     DOCUMENTS_CONTAINER_NAME: str = _get_env("DOCUMENTS_CONTAINER_NAME")
     INGEST_DESTINATION_PREFIX: str = _get_env(
         "INGEST_DESTINATION_PREFIX",
