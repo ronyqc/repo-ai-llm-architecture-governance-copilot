@@ -125,6 +125,31 @@ class Settings:
         "AZURE_STORAGE_CONNECTION_STRING",
         "UseDevelopmentStorage=true",
     )
+    DOCUMENTS_CONTAINER_NAME: str = _get_env("DOCUMENTS_CONTAINER_NAME")
+    INGEST_DESTINATION_PREFIX: str = _get_env(
+        "INGEST_DESTINATION_PREFIX",
+        "admin-ingest",
+    )
+    INGEST_ALLOWED_SOURCE_CONTAINERS: tuple[str, ...] = _get_env_csv(
+        "INGEST_ALLOWED_SOURCE_CONTAINERS",
+        (),
+    )
+    INGEST_ALLOWED_KNOWLEDGE_DOMAINS: tuple[str, ...] = _get_env_csv(
+        "INGEST_ALLOWED_KNOWLEDGE_DOMAINS",
+        (
+            "bian",
+            "building_blocks",
+            "guidelines_patterns",
+        ),
+    )
+    INGEST_ADMIN_ROLES: tuple[str, ...] = _get_env_csv(
+        "INGEST_ADMIN_ROLES",
+        ("admin",),
+    )
+    INGEST_ADMIN_SCOPES: tuple[str, ...] = _get_env_csv(
+        "INGEST_ADMIN_SCOPES",
+        (),
+    )
     CONFLUENCE_BASE_URL: str = _get_env("CONFLUENCE_BASE_URL")
     CONFLUENCE_EMAIL: str = _get_env("CONFLUENCE_EMAIL")
     CONFLUENCE_API_TOKEN: str = _get_env("CONFLUENCE_API_TOKEN")
@@ -140,7 +165,7 @@ class Settings:
     AZURE_JWKS_URL: str = _get_env("AZURE_JWKS_URL")
     REQUIRE_ADMIN_FOR_INGEST: bool = _get_env_bool(
         "REQUIRE_ADMIN_FOR_INGEST",
-        False,
+        True,
     )
     QUERY_MIN_LENGTH: int = _get_env_int("QUERY_MIN_LENGTH", 3)
     QUERY_MAX_LENGTH: int = _get_env_int("QUERY_MAX_LENGTH", 2048)

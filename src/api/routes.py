@@ -10,7 +10,6 @@ from src.api.schemas import (
     QueryResponse,
     SourceReference,
 )
-from src.core.config import settings
 from src.core.health import SystemHealthService
 from src.core.llm_client import (
     AzureOpenAIContentFilterError,
@@ -19,6 +18,10 @@ from src.core.llm_client import (
 )
 from src.core.orchestrator import BasicQueryOrchestrator, QueryOrchestrationRequest
 from src.core.routing import QueryRoutingError
+from src.integrations.blob_ingest_service import (
+    BlobDocumentIngestService,
+    IngestServiceError,
+)
 from src.integrations.confluence_client import (
     ConfluenceConfigurationError,
     ConfluenceError,
@@ -33,8 +36,8 @@ from src.rag.vector_store import (
 )
 from src.security.auth import (
     AuthenticatedUser,
-    require_admin_user,
     require_authenticated_user,
+    require_ingest_user,
 )
 from src.security.guardrails import (
     GuardrailService,
@@ -46,11 +49,6 @@ from src.utils.logger import get_logger
 router = APIRouter()
 logger = get_logger(__name__)
 _GUARDRAIL_SERVICE = GuardrailService.from_settings()
-ingest_dependency = (
-    require_admin_user
-    if settings.REQUIRE_ADMIN_FOR_INGEST
-    else require_authenticated_user
-)
 
 
 def get_query_orchestrator() -> BasicQueryOrchestrator:
@@ -63,6 +61,10 @@ def get_health_service() -> SystemHealthService:
 
 def get_guardrail_service() -> GuardrailService:
     return _GUARDRAIL_SERVICE
+
+
+def get_ingest_service() -> BlobDocumentIngestService:
+    return BlobDocumentIngestService.from_settings()
 
 
 @router.get("/api/v1/health")
@@ -201,15 +203,38 @@ def query_copilot(
     )
 
 
-@router.post("/api/v1/ingest", response_model=IngestResponse)
+@router.post(
+    "/api/v1/ingest",
+    response_model=IngestResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 def ingest_document(
     payload: IngestRequest,
-    _user: AuthenticatedUser = Depends(ingest_dependency),
+    ingest_service: BlobDocumentIngestService = Depends(get_ingest_service),
+    user: AuthenticatedUser = Depends(require_ingest_user),
 ) -> IngestResponse:
     trace_id = str(uuid4())
 
+    try:
+        ingest_service.ingest(
+            payload=payload,
+            user=user,
+            trace_id=trace_id,
+        )
+    except IngestServiceError as exc:
+        logger.warning(
+            "Ingest request rejected. trace_id=%s user_id=%s error=%s",
+            trace_id,
+            user.user_id,
+            str(exc),
+        )
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=str(exc),
+        ) from exc
+
     return IngestResponse(
         status="accepted",
-        message="Ingesta registrada correctamente",
+        message="Ingest accepted and dispatched to the blob-trigger pipeline.",
         trace_id=trace_id,
     )

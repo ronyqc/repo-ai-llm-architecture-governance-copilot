@@ -1,0 +1,52 @@
+Payment Instruction (Capability)
+1. Role Definition
+2. Example of Use
+3. Executive Summary
+4. Key Features
+Documentation
+Properties
+Appears on
+Relations
+1. Role Definition
+The Payment Instruction Service Domain handles the initial assembly and verification of payment instructions that may be requested by third party payment service providers and/or bank customers that access external payment services. The Service Domain checks that any and all agreements are in place with respect to all interested parties and payment agencies, that the requested action is allowed and within any associated limits and that all required information is available and where possible/appropriate is validated/verified. Once the instruction has been assembled and all checks performed it is routed to the associated fulfillment Service Domain where the payment transaction can be initiated
+2. Example of Use
+An inbound request for payment transaction is received from a third party payment service. The associated service permissions and customer arrangements are confirmed. Compliance and fraud checks are completed before the instruction is passed to the customer's account handling Service Domain for further processing
+3. Executive Summary
+This Service Domain processes the pre-checks needed to confirm the necessary arrangements are in place and assemble and rout payment related requests received from third party payment services.
+4. Key Features
+Confirm received instruction is covered by established arrangements 
+Check that instruction is compliant with applicable regulations 
+
+Verify instruction details and assemble/format request 
+
+Route payment instruction to the target customer/holding account
+
+Documentation
+** 1. Role ** 
+The Payment Instruction Service Domain handles the initial assembly and verification of payment instructions that may be requested by third party payment service providers and/or bank customers that access external payment services. The Service Domain checks that any and all agreements are in place with respect to all interested parties and payment agencies, that the requested action is allowed and within any associated limits and that all required information is available and where possible/appropriate is validated/verified. Once the instruction has been assembled and all checks performed it is routed to the associated fulfillment Service Domain where the payment transaction can be initiated 
+
+ 
+
+** 2. Examples of use ** 
+
+An inbound request for payment transaction is received from a third party payment service. The associated service permissions and customer arrangements are confirmed. Compliance and fraud checks are completed before the instruction is passed to the customer's account handling Service Domain for further processing  
+
+ 
+
+** 3.Executive Summary ** 
+
+This Service Domain processes the pre-checks needed to confirm the necessary arrangements are in place and assemble and rout payment related requests received from third party payment services. 
+
+ 
+
+** 4. Key Features ** 
+
+Confirm received instruction is covered by established arrangements 
+
+Check that instruction is compliant with applicable regulations 
+
+Verify instruction details and assemble/format request 
+
+Route payment instruction to the target customer/holding account 
+
+ 
