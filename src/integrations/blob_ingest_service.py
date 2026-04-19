@@ -21,6 +21,8 @@ _SUPPORTED_SOURCE_TYPES = {
     ".txt": "plain_text",
     ".html": "html_page",
     ".htm": "html_page",
+    ".pdf": "pdf_document",
+    ".docx": "docx_document",
 }
 
 

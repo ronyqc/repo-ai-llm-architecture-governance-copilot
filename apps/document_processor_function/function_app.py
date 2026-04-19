@@ -12,7 +12,12 @@ try:
 except ModuleNotFoundError:
     load_dotenv = None
 
-from processing.blob_reader import read_blob_text
+from processing.blob_reader import read_blob_bytes
+from processing.content_extractors import (
+    SUPPORTED_FILE_SOURCE_TYPES,
+    extract_text_from_bytes,
+    infer_source_type_from_file_name,
+)
 from processing.document_processor import process_normalized_document
 from processing.embedding_service import vectorize_chunks
 from processing.search_indexer import index_chunks as upload_chunks_to_search
@@ -35,7 +40,7 @@ BLOB_MODE_REQUIRED_FIELDS = (
 BLOB_TRIGGER_PATH = "%DOCUMENTS_CONTAINER_NAME%/{name}"
 DEFAULT_BLOB_SOURCE_SYSTEM = "azure_blob_trigger"
 DEFAULT_BLOB_UPLOADED_BY = "system"
-SUPPORTED_SOURCE_TYPES = {"markdown_curated", "plain_text", "html_page"}
+SUPPORTED_SOURCE_TYPES = set(SUPPORTED_FILE_SOURCE_TYPES.values())
 
 
 @app.route(route="processDocument", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -70,10 +75,18 @@ def process_document_http(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         source_input = _resolve_source_input(payload)
+        extracted_source = extract_text_from_bytes(
+            source_input["content_bytes"],
+            file_name=source_input["document_name"],
+        )
+        resolved_source_type = _resolve_http_source_type(
+            requested_source_type=payload["source_type"],
+            inferred_source_type=extracted_source["source_type"],
+        )
         pipeline_result = _run_document_pipeline(
-            raw_content=source_input["content"],
+            raw_content=extracted_source["content"],
             knowledge_domain=payload["knowledge_domain"],
-            source_type=payload["source_type"],
+            source_type=resolved_source_type,
             document_name=source_input["document_name"],
             source_url=source_input.get("source_url"),
             document_metadata=None,
@@ -128,10 +141,15 @@ def process_document_blob(input_blob: func.InputStream) -> None:
     )
 
     try:
-        raw_content = _read_trigger_blob_text(input_blob)
+        blob_bytes = _read_trigger_blob_bytes(input_blob)
+        extracted_source = extract_text_from_bytes(
+            blob_bytes,
+            file_name=document_name,
+        )
         knowledge_domain, source_type = _resolve_blob_source_metadata(
             blob_name=blob_name,
-            raw_content=raw_content,
+            raw_content=extracted_source["content"],
+            inferred_source_type=extracted_source["source_type"],
         )
         logging.info(
             "Resolved blob metadata -> domain=%s, source_type=%s, blob_name=%s",
@@ -140,7 +158,7 @@ def process_document_blob(input_blob: func.InputStream) -> None:
             blob_name,
         )
         pipeline_result = _run_document_pipeline(
-            raw_content=raw_content,
+            raw_content=extracted_source["content"],
             knowledge_domain=knowledge_domain,
             source_type=source_type,
             document_name=document_name,
@@ -250,19 +268,18 @@ def _build_blob_trigger_metadata(container_name: str, blob_name: str) -> dict:
     }
 
 
-def _read_trigger_blob_text(input_blob: func.InputStream) -> str:
+def _read_trigger_blob_bytes(input_blob: func.InputStream) -> bytes:
     try:
-        blob_bytes = input_blob.read()
+        return input_blob.read()
     except Exception as exc:
         raise RuntimeError("Failed to read blob content from trigger input.") from exc
 
-    try:
-        return blob_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError("Blob content could not be decoded as UTF-8.") from exc
 
-
-def _resolve_blob_source_metadata(blob_name: str, raw_content: str) -> tuple[str, str]:
+def _resolve_blob_source_metadata(
+    blob_name: str,
+    raw_content: str,
+    inferred_source_type: str | None,
+) -> tuple[str, str]:
     yaml_metadata = _extract_yaml_metadata(raw_content)
     yaml_knowledge_domain = yaml_metadata.get("knowledge_domain", "").strip()
     yaml_source_type = yaml_metadata.get("source_type", "").strip()
@@ -278,7 +295,7 @@ def _resolve_blob_source_metadata(blob_name: str, raw_content: str) -> tuple[str
         )
 
     inferred_knowledge_domain = _infer_knowledge_domain_from_blob_name(blob_name)
-    inferred_source_type = _infer_source_type_from_blob_name(blob_name)
+    blob_name_source_type = _infer_source_type_from_blob_name(blob_name)
 
     knowledge_domain = (
         yaml_knowledge_domain
@@ -289,6 +306,7 @@ def _resolve_blob_source_metadata(blob_name: str, raw_content: str) -> tuple[str
     source_type = (
         yaml_source_type if yaml_source_type in SUPPORTED_SOURCE_TYPES else ""
         or inferred_source_type
+        or blob_name_source_type
         or os.getenv("DEFAULT_SOURCE_TYPE", "plain_text").strip()
         or "plain_text"
     )
@@ -323,19 +341,7 @@ def _extract_yaml_metadata(raw_content: str) -> dict[str, str]:
 
 
 def _infer_source_type_from_blob_name(blob_name: str) -> str | None:
-    normalized_blob_name = blob_name.lower()
-    file_name = Path(normalized_blob_name).name
-
-    if any(token in file_name for token in ("_html", "-html", ".html", ".htm")):
-        return "html_page"
-    if normalized_blob_name.endswith(".html") or normalized_blob_name.endswith(".htm"):
-        return "html_page"
-    if normalized_blob_name.endswith(".md"):
-        return "markdown_curated"
-    if normalized_blob_name.endswith(".txt"):
-        return "plain_text"
-
-    return None
+    return infer_source_type_from_file_name(Path(blob_name).name)
 
 
 def _infer_knowledge_domain_from_blob_name(blob_name: str) -> str | None:
@@ -427,10 +433,21 @@ def _resolve_source_input(payload: dict) -> dict:
         return _read_local_text(payload["file_path"])
 
     _validate_required_fields(payload, BLOB_MODE_REQUIRED_FIELDS)
-    return read_blob_text(
+    return read_blob_bytes(
         container_name=payload["container_name"],
         blob_name=payload["blob_name"],
     )
+
+
+def _resolve_http_source_type(
+    *,
+    requested_source_type: str,
+    inferred_source_type: str,
+) -> str:
+    if requested_source_type == inferred_source_type:
+        return requested_source_type
+
+    return inferred_source_type
 
 
 def _validate_required_fields(payload: dict, required_fields: tuple[str, ...]) -> None:
@@ -440,19 +457,14 @@ def _validate_required_fields(payload: dict, required_fields: tuple[str, ...]) -
 
 
 def _read_local_text(file_path: str) -> dict:
-    """Read a local UTF-8 text file and return canonical source input fields."""
+    """Read a local file and return canonical source input fields."""
     path = Path(file_path)
     if not path.is_file():
         raise FileNotFoundError(f"Document not found: {file_path}")
 
-    try:
-        content = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError("Local file content could not be decoded as UTF-8.") from exc
-
     return {
         "document_name": path.name,
-        "content": content,
+        "content_bytes": path.read_bytes(),
         "source_url": str(path),
     }
 
