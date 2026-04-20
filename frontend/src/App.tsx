@@ -2,6 +2,7 @@ import { useState } from "react";
 import { HealthStatus } from "./components/HealthStatus";
 import { LoginButton } from "./components/LoginButton";
 import { QueryBox } from "./components/QueryBox";
+import { AdminUploadPanel } from "./components/AdminUploadPanel";
 import { queryCopilot } from "./services/queryService";
 import type { QueryResponse } from "./types/query";
 import { useAuth } from "./auth/useAuth";
@@ -144,6 +145,8 @@ function App() {
             </div>
           )}
         </section>
+
+        <AdminUploadPanel />
 
         <section className="panel">
           <h2>Respuesta</h2>

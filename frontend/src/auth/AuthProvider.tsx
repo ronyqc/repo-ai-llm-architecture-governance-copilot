@@ -13,6 +13,7 @@ import {
   signOut as signOutWithMsal,
 } from "./authService";
 import { AuthContext, type AuthContextValue } from "./authContext";
+import { getAccessTokenClaims } from "./tokenClaims";
 import { setStoredAccessToken } from "./tokenStore";
 
 type AuthProviderProps = {
@@ -154,16 +155,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [account, instance]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({
-      account,
-      accessToken,
-      isAuthenticated: Boolean(account),
-      isLoadingAuth,
-      authError,
-      signIn: handleSignIn,
-      signOut: handleSignOut,
-      refreshAccessToken,
-    }),
+    () => {
+      const claims = getAccessTokenClaims(accessToken);
+
+      return {
+        account,
+        accessToken,
+        isAuthenticated: Boolean(account),
+        isLoadingAuth,
+        authError,
+        roles: claims.roles,
+        scopes: claims.scopes,
+        isAdmin: claims.isAdmin,
+        signIn: handleSignIn,
+        signOut: handleSignOut,
+        refreshAccessToken,
+      };
+    },
     [
       account,
       accessToken,

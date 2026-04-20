@@ -42,8 +42,9 @@ body {
 
 .app-main {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
+  align-items: start;
 }
 
 .panel {
@@ -51,6 +52,97 @@ body {
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+.panel-title-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.panel-title-row h2 {
+  margin: 0 0 6px 0;
+}
+
+.panel-subtitle {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.admin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+}
+
+.field-group {
+  display: grid;
+  gap: 8px;
+}
+
+.field-group label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.field-help {
+  color: #64748b;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.secondary-button {
+  background: #0f766e;
+}
+
+.status-card {
+  border: 1px solid #dbe4f0;
+  border-radius: 10px;
+  padding: 14px;
+  background: #f8fbff;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.status-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.error-banner {
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
 }
 
 .response-placeholder {
@@ -163,6 +255,17 @@ textarea {
   font-size: 14px;
 }
 
+input[type="file"],
+select {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  background: white;
+  color: #1f2937;
+}
+
 button {
   border: none;
   background: #2563eb;
@@ -179,6 +282,10 @@ button:disabled {
 
 @media (max-width: 960px) {
   .app-main {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-grid {
     grid-template-columns: 1fr;
   }
 
