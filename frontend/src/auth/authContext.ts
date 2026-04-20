@@ -7,6 +7,9 @@ export type AuthContextValue = {
   isAuthenticated: boolean;
   isLoadingAuth: boolean;
   authError: string | null;
+  roles: string[];
+  scopes: string[];
+  isAdmin: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshAccessToken: () => Promise<string | null>;
