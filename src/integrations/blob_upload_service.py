@@ -3,9 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
-from azure.storage.blob import BlobSasPermissions, BlobServiceClient, generate_blob_sas
+try:
+    from azure.storage.blob import BlobSasPermissions, BlobServiceClient, generate_blob_sas
+except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal local envs
+    BlobSasPermissions = Any
+    BlobServiceClient = Any
+    generate_blob_sas = None
 
 from src.core.config import Settings, settings
 
@@ -87,6 +92,14 @@ class BlobUploadUrlService:
         cls,
         app_settings: Settings = settings,
     ) -> "BlobUploadUrlService":
+        if (
+            BlobServiceClient is Any
+            or BlobSasPermissions is Any
+            or generate_blob_sas is None
+        ):
+            raise UploadUrlConfigurationError(
+                "azure-storage-blob must be installed to use BlobUploadUrlService."
+            )
         account_name, account_key = _extract_storage_account_credentials(
             app_settings.AZURE_STORAGE_CONNECTION_STRING
         )

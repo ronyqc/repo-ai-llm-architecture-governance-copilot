@@ -46,6 +46,7 @@ function App() {
     useAuth();
   const [query, setQuery] = useState("");
   const [response, setResponse] = useState<QueryResponse | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const trimmedQuery = query.trim();
@@ -92,10 +93,12 @@ function App() {
 
       const result = await queryCopilot({
         query: trimmedQuery,
+        session_id: sessionId ?? undefined,
         stream: false,
       }, tokenToUse);
 
       setResponse(result);
+      setSessionId(result.session_id);
     } catch (error) {
       setQueryError(
         error instanceof Error

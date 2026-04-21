@@ -2,11 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import unquote, urlparse
 
-from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
-from azure.storage.blob import BlobServiceClient
+try:
+    from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+    from azure.storage.blob import BlobServiceClient
+except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal local envs
+    BlobServiceClient = Any
+
+    class ResourceExistsError(Exception):
+        """Fallback when azure-core is unavailable."""
+
+    class ResourceNotFoundError(Exception):
+        """Fallback when azure-core is unavailable."""
 
 from src.api.schemas import IngestRequest
 from src.core.config import Settings, settings
@@ -122,6 +131,10 @@ class BlobDocumentIngestService:
         cls,
         app_settings: Settings = settings,
     ) -> "BlobDocumentIngestService":
+        if BlobServiceClient is Any:
+            raise IngestValidationError(
+                "azure-storage-blob must be installed to use BlobDocumentIngestService."
+            )
         return cls(
             blob_service_client=BlobServiceClient.from_connection_string(
                 app_settings.AZURE_STORAGE_CONNECTION_STRING

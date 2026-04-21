@@ -125,6 +125,14 @@ class Settings:
         "AZURE_STORAGE_CONNECTION_STRING",
         "UseDevelopmentStorage=true",
     )
+    AZURE_TABLE_CONVERSATION_TABLE_NAME: str = _get_env(
+        "AZURE_TABLE_CONVERSATION_TABLE_NAME",
+        "ConversationHistory",
+    )
+    QUERY_HISTORY_MAX_TURNS: int = _get_env_int(
+        "QUERY_HISTORY_MAX_TURNS",
+        3,
+    )
     RAW_UPLOAD_CONTAINER_NAME: str = _get_env(
         "RAW_UPLOAD_CONTAINER_NAME",
         "raw-corpus",

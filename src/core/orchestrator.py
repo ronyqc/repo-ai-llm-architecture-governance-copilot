@@ -39,6 +39,16 @@ class QuerySource:
     source_type: str
     title: str
     score: float
+    knowledge_domain: str | None = None
+
+
+@dataclass(frozen=True)
+class ConversationContextTurn:
+    """Recent conversation turn recovered for continuity."""
+
+    user_query: str
+    assistant_answer: str
+    created_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +57,7 @@ class QueryOrchestrationRequest:
 
     query: str
     trace_id: str
+    conversation_history: list[ConversationContextTurn] | None = None
 
 
 @dataclass(frozen=True)
@@ -315,6 +326,7 @@ class BasicQueryOrchestrator:
                     context_block=context_block,
                     sources=sources,
                     context_strength=context_strength,
+                    conversation_history=request.conversation_history or [],
                 ),
                 temperature=0.0,
                 max_tokens=900,
@@ -457,11 +469,13 @@ class BasicQueryOrchestrator:
         context_block: str,
         sources: list[QuerySource],
         context_strength: ContextStrength,
+        conversation_history: list[ConversationContextTurn],
     ) -> str:
         source_titles = "\n".join(
             f"- {source.title or source.source_id}"
             for source in sources
         )
+        history_block = self._build_conversation_history_block(conversation_history)
         evidence_note = (
             "La evidencia recuperada es suficientemente directa para formular recomendaciones concretas, "
             "siempre que cada punto este sustentado en el contexto."
@@ -480,19 +494,22 @@ class BasicQueryOrchestrator:
             f"{context_strength.value}\n\n"
             "Interpretacion operativa del nivel de confianza:\n"
             f"{evidence_note}\n\n"
+            "Historial conversacional reciente para continuidad:\n"
+            f"{history_block}\n\n"
             "Fuentes deduplicadas disponibles para sustento:\n"
             f"{source_titles}\n\n"
             "Contexto recuperado y autorizado para grounding:\n"
             f"{context_block}\n\n"
             "Instrucciones operativas:\n"
             "1. Usa solo el contexto recuperado.\n"
-            "2. Si mencionas building blocks, patrones o referencias BIAN, deben aparecer en el contexto.\n"
-            "3. Si mencionas acuerdos internos recientes, deben aparecer en el contexto de Confluence recuperado.\n"
-            "4. Si un punto no esta sustentado, indicalo como no confirmado.\n"
-            "5. Si el contexto es parcial o tangencial, evita recomendar un patron o building block especifico con falsa certeza.\n"
-            "6. En \"Fuentes consultadas\", cita por titulo las fuentes deduplicadas que realmente sustentan tu respuesta.\n"
-            "7. Usa Markdown limpio con encabezados `##` y listas con `-`.\n"
-            "8. Manten el formato exacto solicitado en el system prompt."
+            "2. Usa el historial conversacional solo para resolver referencias del turno actual o mantener continuidad; el historial no reemplaza el grounding.\n"
+            "3. Si mencionas building blocks, patrones o referencias BIAN, deben aparecer en el contexto.\n"
+            "4. Si mencionas acuerdos internos recientes, deben aparecer en el contexto de Confluence recuperado.\n"
+            "5. Si un punto no esta sustentado, indicalo como no confirmado.\n"
+            "6. Si el contexto es parcial o tangencial, evita recomendar un patron o building block especifico con falsa certeza.\n"
+            "7. En \"Fuentes consultadas\", cita por titulo las fuentes deduplicadas que realmente sustentan tu respuesta.\n"
+            "8. Usa Markdown limpio con encabezados `##` y listas con `-`.\n"
+            "9. Manten el formato exacto solicitado en el system prompt."
         )
 
     @staticmethod
@@ -510,6 +527,28 @@ class BasicQueryOrchestrator:
                         f"document_name: {chunk.document_name or '(unknown)'}",
                         f"score: {chunk.score:.4f}",
                         f"content: {chunk.content}",
+                    ]
+                )
+            )
+        return "\n\n".join(sections)
+
+    @staticmethod
+    def _build_conversation_history_block(
+        turns: list[ConversationContextTurn],
+    ) -> str:
+        if not turns:
+            return "- Sin historial previo recuperado para esta sesion."
+
+        sections = []
+        for index, turn in enumerate(turns, start=1):
+            created_at = (turn.created_at or "").strip() or "(unknown)"
+            sections.append(
+                "\n".join(
+                    [
+                        f"[Turno previo {index}]",
+                        f"created_at: {created_at}",
+                        f"user_query: {turn.user_query}",
+                        f"assistant_answer: {turn.assistant_answer}",
                     ]
                 )
             )
@@ -582,6 +621,7 @@ class BasicQueryOrchestrator:
                 source_type=chunk.source_type,
                 title=title or document_name or chunk.source_id,
                 score=chunk.score,
+                knowledge_domain=chunk.knowledge_domain,
             )
             current = deduped.get(dedupe_key)
             if current is None or candidate.score > current.score:

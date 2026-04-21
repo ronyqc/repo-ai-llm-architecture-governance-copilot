@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from src.api.main import app
 from src.api.routes import (
+    get_conversation_store,
     get_guardrail_service,
     get_query_orchestrator,
 )
@@ -16,6 +17,10 @@ from src.core.orchestrator import (
 )
 from src.core.llm_client import AzureOpenAIContentFilterError
 from src.integrations.confluence_client import ConfluenceError
+from src.integrations.conversation_store import (
+    ConversationStoreError,
+    ConversationTurn,
+)
 from src.security.auth import AuthenticatedUser, require_authenticated_user
 from src.security.guardrails import (
     GuardrailService,
@@ -33,6 +38,9 @@ class QueryEndpointTests(unittest.TestCase):
             sources=[],
             tokens_used=0,
         )
+        default_conversation_store = Mock()
+        default_conversation_store.get_recent_history.return_value = []
+        default_conversation_store.append_turn.return_value = "turn_000001"
 
         app.dependency_overrides[require_authenticated_user] = lambda: AuthenticatedUser(
             user_id="test-user",
@@ -40,6 +48,9 @@ class QueryEndpointTests(unittest.TestCase):
             claims={},
         )
         app.dependency_overrides[get_query_orchestrator] = lambda: default_orchestrator
+        app.dependency_overrides[get_conversation_store] = (
+            lambda: default_conversation_store
+        )
         app.dependency_overrides[get_guardrail_service] = (
             lambda: GuardrailService(
                 input_guardrails=QueryInputGuardrails(
@@ -95,6 +106,124 @@ class QueryEndpointTests(unittest.TestCase):
         self.assertEqual(body["sources"][0]["source_id"], "doc-1")
         self.assertTrue(body["trace_id"])
         self.assertTrue(body["session_id"])
+
+    def test_query_endpoint_recovers_history_when_session_id_is_provided(self) -> None:
+        orchestrator = Mock()
+        orchestrator.answer.return_value = QueryOrchestrationResult(
+            answer="Respuesta basada en contexto",
+            sources=[],
+            tokens_used=21,
+        )
+        conversation_store = Mock()
+        conversation_store.get_recent_history.return_value = [
+            ConversationTurn(
+                row_key="turn_000001",
+                user_query="Que building blocks aplican para autenticacion?",
+                assistant_answer="Se recomienda un gateway.",
+                created_at="2026-04-20T12:00:00Z",
+                trace_id="trace-old",
+                knowledge_domain="building_blocks",
+                tokens_used=100,
+                latency_ms=321.0,
+                sources_json="[]",
+            )
+        ]
+        app.dependency_overrides[get_query_orchestrator] = lambda: orchestrator
+        app.dependency_overrides[get_conversation_store] = lambda: conversation_store
+
+        response = self.client.post(
+            "/api/v1/query",
+            json={
+                "query": "Y para autorizacion?",
+                "session_id": "session-123",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        conversation_store.get_recent_history.assert_called_once_with(
+            session_id="session-123"
+        )
+        request_sent = orchestrator.answer.call_args.args[0]
+        self.assertEqual(len(request_sent.conversation_history), 1)
+        self.assertEqual(
+            request_sent.conversation_history[0].user_query,
+            "Que building blocks aplican para autenticacion?",
+        )
+
+    def test_query_endpoint_persists_new_interaction_in_conversation_store(self) -> None:
+        orchestrator = Mock()
+        orchestrator.answer.return_value = QueryOrchestrationResult(
+            answer="Respuesta basada en contexto",
+            sources=[
+                QuerySource(
+                    source_id="doc-1",
+                    source_type="pdf",
+                    title="Architecture Guide",
+                    score=0.93,
+                    knowledge_domain="building_blocks",
+                )
+            ],
+            tokens_used=321,
+        )
+        conversation_store = Mock()
+        conversation_store.get_recent_history.return_value = []
+        app.dependency_overrides[get_query_orchestrator] = lambda: orchestrator
+        app.dependency_overrides[get_conversation_store] = lambda: conversation_store
+
+        response = self.client.post(
+            "/api/v1/query",
+            json={
+                "query": "Que building blocks aplican para autenticacion?",
+                "session_id": "session-abc",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        conversation_store.append_turn.assert_called_once()
+        persisted_record = conversation_store.append_turn.call_args.args[0]
+        self.assertEqual(persisted_record.session_id, "session-abc")
+        self.assertEqual(
+            persisted_record.user_query,
+            "Que building blocks aplican para autenticacion?",
+        )
+        self.assertEqual(persisted_record.assistant_answer, "Respuesta basada en contexto")
+        self.assertEqual(persisted_record.trace_id, response.json()["trace_id"])
+        self.assertEqual(persisted_record.knowledge_domain, "building_blocks")
+        self.assertEqual(persisted_record.tokens_used, 321)
+        self.assertGreaterEqual(persisted_record.latency_ms, 0.0)
+        self.assertEqual(persisted_record.sources[0]["source_id"], "doc-1")
+
+    def test_query_endpoint_continues_when_conversation_store_fails(self) -> None:
+        orchestrator = Mock()
+        orchestrator.answer.return_value = QueryOrchestrationResult(
+            answer="Respuesta sin memoria persistida",
+            sources=[],
+            tokens_used=12,
+        )
+        conversation_store = Mock()
+        conversation_store.get_recent_history.side_effect = ConversationStoreError(
+            "history read failed"
+        )
+        conversation_store.append_turn.side_effect = ConversationStoreError(
+            "history write failed"
+        )
+        app.dependency_overrides[get_query_orchestrator] = lambda: orchestrator
+        app.dependency_overrides[get_conversation_store] = lambda: conversation_store
+
+        response = self.client.post(
+            "/api/v1/query",
+            json={
+                "query": "Que building blocks aplican para autenticacion?",
+                "session_id": "session-broken",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["answer"], "Respuesta sin memoria persistida")
+        conversation_store.get_recent_history.assert_called_once_with(
+            session_id="session-broken"
+        )
+        conversation_store.append_turn.assert_called_once()
 
     def test_query_endpoint_rejects_streaming_for_now(self) -> None:
         response = self.client.post(
