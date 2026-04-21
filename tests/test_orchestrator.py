@@ -6,6 +6,7 @@ from unittest.mock import Mock
 from src.core.llm_client import LLMGenerationResult
 from src.core.orchestrator import (
     BasicQueryOrchestrator,
+    ConversationContextTurn,
     QueryOrchestrationRequest,
     QueryScopeClassifier,
     ScopeAssessment,
@@ -91,6 +92,71 @@ class BasicQueryOrchestratorTests(unittest.TestCase):
         self.assertIn("Azure AI Search y/o de paginas internas de Confluence", system_prompt)
         self.assertIn("Trace ID: trace-123", prompt)
         self.assertIn("Use a centralized authentication gateway.", prompt)
+
+    def test_answer_includes_recent_conversation_history_in_final_prompt(self) -> None:
+        retriever = Mock()
+        retriever.retrieve.return_value = [
+            SearchChunk(
+                source_id="doc-1",
+                source_type="pdf",
+                title="Architecture Guide",
+                content="Use a centralized authentication gateway.",
+                score=0.87,
+                knowledge_domain="building_blocks",
+                source_url=None,
+                document_name="guide.pdf",
+                chunk_order=1,
+                metadata=None,
+                chunk_id="guide#1",
+                updated_at=None,
+            )
+        ]
+        llm_client = Mock()
+        llm_client.generate_answer.return_value = LLMGenerationResult(
+            answer="## 1. Resumen del caso\n\nRespuesta con continuidad.",
+            tokens_used=120,
+            finish_reason="stop",
+        )
+        query_router = Mock(spec=QueryRouter)
+        query_router.route.return_value = RoutingDecision(
+            strategy=RetrievalStrategy.RAG_ONLY,
+            reason="La consulta busca building blocks del corpus indexado.",
+            tokens_used=21,
+        )
+        scope_classifier = Mock(spec=QueryScopeClassifier)
+        scope_classifier.assess.return_value = ScopeAssessment(
+            decision=ScopeDecision.IN_SCOPE,
+            reason="positive_hints=autentic",
+        )
+
+        orchestrator = BasicQueryOrchestrator(
+            retriever=retriever,
+            llm_client=llm_client,
+            confluence_client=Mock(),
+            query_router=query_router,
+            scope_classifier=scope_classifier,
+            precheck_top_k=1,
+            precheck_score_threshold=0.6,
+        )
+
+        orchestrator.answer(
+            QueryOrchestrationRequest(
+                query="Y para autorizacion?",
+                trace_id="trace-history",
+                conversation_history=[
+                    ConversationContextTurn(
+                        user_query="Que building blocks aplican para autenticacion?",
+                        assistant_answer="Se recomienda un gateway centralizado.",
+                        created_at="2026-04-20T12:00:00Z",
+                    )
+                ],
+            )
+        )
+
+        prompt = llm_client.generate_answer.call_args.args[0].user_prompt
+        self.assertIn("Historial conversacional reciente para continuidad", prompt)
+        self.assertIn("Que building blocks aplican para autenticacion?", prompt)
+        self.assertIn("Se recomienda un gateway centralizado.", prompt)
 
     def test_answer_returns_structured_fallback_without_final_llm_when_no_context_is_found(self) -> None:
         retriever = Mock()

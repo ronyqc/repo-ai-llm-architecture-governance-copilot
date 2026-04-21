@@ -18,7 +18,11 @@ from src.core.llm_client import (
     AzureOpenAILLMConfigurationError,
     AzureOpenAILLMError,
 )
-from src.core.orchestrator import BasicQueryOrchestrator, QueryOrchestrationRequest
+from src.core.orchestrator import (
+    BasicQueryOrchestrator,
+    ConversationContextTurn,
+    QueryOrchestrationRequest,
+)
 from src.core.routing import QueryRoutingError
 from src.integrations.blob_ingest_service import (
     BlobDocumentIngestService,
@@ -31,6 +35,14 @@ from src.integrations.blob_upload_service import (
 from src.integrations.confluence_client import (
     ConfluenceConfigurationError,
     ConfluenceError,
+)
+from src.integrations.conversation_store import (
+    AzureTableConversationStore,
+    ConversationStoreConfigurationError,
+    ConversationStoreError,
+    ConversationTurnRecord,
+    NoOpConversationStore,
+    build_created_at_timestamp,
 )
 from src.rag.embeddings import (
     AzureOpenAIEmbeddingConfigurationError,
@@ -78,6 +90,14 @@ def get_blob_upload_service() -> BlobUploadUrlService:
     return BlobUploadUrlService.from_settings()
 
 
+def get_conversation_store() -> AzureTableConversationStore | NoOpConversationStore:
+    try:
+        return AzureTableConversationStore.from_settings()
+    except ConversationStoreConfigurationError:
+        logger.warning("Conversation store configuration is unavailable. Falling back to no-op store.")
+        return NoOpConversationStore()
+
+
 @router.get("/api/v1/health")
 def health_check(
     health_service: SystemHealthService = Depends(get_health_service),
@@ -96,11 +116,13 @@ def query_copilot(
     payload: QueryRequest,
     orchestrator: BasicQueryOrchestrator = Depends(get_query_orchestrator),
     guardrail_service: GuardrailService = Depends(get_guardrail_service),
+    conversation_store: AzureTableConversationStore = Depends(get_conversation_store),
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ) -> QueryResponse:
     start_time = perf_counter()
     session_id = payload.session_id or str(uuid4())
     trace_id = str(uuid4())
+    conversation_history: list[ConversationContextTurn] = []
 
     if payload.stream:
         raise HTTPException(
@@ -134,11 +156,30 @@ def query_copilot(
         validated_query.sanitized_query[:120],
     )
 
+    if payload.session_id:
+        try:
+            persisted_turns = conversation_store.get_recent_history(session_id=session_id)
+            conversation_history = [
+                ConversationContextTurn(
+                    user_query=turn.user_query,
+                    assistant_answer=turn.assistant_answer,
+                    created_at=turn.created_at,
+                )
+                for turn in persisted_turns
+            ]
+        except ConversationStoreError:
+            logger.exception(
+                "Conversation history unavailable. trace_id=%s session_id=%s",
+                trace_id,
+                session_id,
+            )
+
     try:
         result = orchestrator.answer(
             QueryOrchestrationRequest(
                 query=validated_query.sanitized_query,
                 trace_id=trace_id,
+                conversation_history=conversation_history,
             )
         )
     except (
@@ -196,6 +237,36 @@ def query_copilot(
         latency_ms,
     )
 
+    try:
+        conversation_store.append_turn(
+            ConversationTurnRecord(
+                session_id=session_id,
+                user_query=validated_query.sanitized_query,
+                assistant_answer=result.answer,
+                created_at=build_created_at_timestamp(),
+                trace_id=trace_id,
+                knowledge_domain=_resolve_primary_knowledge_domain(result.sources),
+                tokens_used=result.tokens_used,
+                latency_ms=latency_ms,
+                sources=[
+                    {
+                        "source_id": source.source_id,
+                        "source_type": source.source_type,
+                        "title": source.title,
+                        "score": source.score,
+                        "knowledge_domain": source.knowledge_domain,
+                    }
+                    for source in result.sources
+                ],
+            )
+        )
+    except ConversationStoreError:
+        logger.exception(
+            "Conversation turn was not persisted. trace_id=%s session_id=%s",
+            trace_id,
+            session_id,
+        )
+
     return QueryResponse(
         answer=result.answer,
         sources=[
@@ -212,6 +283,14 @@ def query_copilot(
         trace_id=trace_id,
         session_id=session_id,
     )
+
+
+def _resolve_primary_knowledge_domain(sources: list[object]) -> str:
+    for source in sources:
+        knowledge_domain = getattr(source, "knowledge_domain", None)
+        if isinstance(knowledge_domain, str) and knowledge_domain.strip():
+            return knowledge_domain.strip()
+    return ""
 
 
 @router.post(
