@@ -2,7 +2,7 @@
 id: bb-<slug-unico>
 title: "<Nombre del building block>"
 knowledge_domain: building_blocks
-source_type: building_block
+source_type: "<markdown_curated / plain_text / html_page>"
 document_name: "<nombre-logico>"
 version: "1.0"
 language: "es"

@@ -2,7 +2,7 @@
 id: gl-<slug-unico>
 title: "<Nombre del lineamiento>"
 knowledge_domain: guidelines_patterns
-source_type: guideline
+source_type: "<markdown_curated / plain_text / html_page>"
 document_name: "<nombre-logico>"
 version: "1.0"
 language: "es"

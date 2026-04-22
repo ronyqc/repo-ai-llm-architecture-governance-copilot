@@ -7,10 +7,9 @@
 - guidelines_patterns
 
 ## source_type permitidos
-- bian
-- building_block
-- guideline
-- pattern
+- markdown_curated
+- plain_text
+- html_page
 
 ## status permitidos
 - draft
@@ -18,7 +17,6 @@
 - approved
 
 ## Campos obligatorios
-- id
 - title
 - knowledge_domain
 - source_type
