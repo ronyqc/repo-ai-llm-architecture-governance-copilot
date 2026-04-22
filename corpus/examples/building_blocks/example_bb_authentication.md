@@ -1,8 +1,7 @@
 ---
-id: bb-authentication-service
 title: "Authentication Service"
 knowledge_domain: building_blocks
-source_type: building_block
+source_type: markdown_curated
 document_name: authentication-service
 version: "1.0"
 language: "es"

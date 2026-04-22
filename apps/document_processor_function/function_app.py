@@ -13,6 +13,7 @@ except ModuleNotFoundError:
     load_dotenv = None
 
 from processing.blob_reader import read_blob_bytes
+from processing.blob_writer import write_page_json_blob
 from processing.content_extractors import (
     SUPPORTED_FILE_SOURCE_TYPES,
     extract_text_from_bytes,
@@ -114,6 +115,63 @@ def process_document_http(req: func.HttpRequest) -> func.HttpResponse:
             "source_type": normalized_document["source_type"],
             "knowledge_domain": normalized_document["knowledge_domain"],
         }
+    )
+
+
+@app.function_name(name="write-page-to-blob")
+@app.route(
+    route="write-page-to-blob",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def write_page_to_blob_http(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        payload = req.get_json()
+    except ValueError:
+        return _json_response(
+            {"status": "error", "message": "Request body must be valid JSON."},
+            status_code=400,
+        )
+
+    if not isinstance(payload, dict):
+        return _json_response(
+            {
+                "status": "error",
+                "message": "Request body must be a JSON object.",
+            },
+            status_code=400,
+        )
+
+    try:
+        _validate_write_page_payload(payload)
+        result = write_page_json_blob(
+            container_name=payload["container"],
+            directory=payload["directory"],
+            file_name=payload["fileName"],
+            content=payload["content"],
+        )
+    except ValueError as exc:
+        return _json_response(
+            {"status": "error", "message": str(exc)},
+            status_code=400,
+        )
+    except RuntimeError as exc:
+        logging.exception("write-page-to-blob failed.")
+        return _json_response(
+            {"status": "error", "message": str(exc)},
+            status_code=500,
+        )
+
+    return _json_response(
+        {
+            "status": "success",
+            "message": "JSON page written to Azure Blob Storage.",
+            "container": result.container_name,
+            "blob_name": result.blob_name,
+            "blob_url": result.blob_url,
+            "file_name": result.file_name,
+        },
+        status_code=201,
     )
 
 
@@ -416,6 +474,22 @@ def _parse_boolean_flag(value: object, field_name: str) -> bool:
             return False
 
     raise ValueError(f"Field '{field_name}' must be a boolean value if provided.")
+
+
+def _validate_write_page_payload(payload: dict) -> None:
+    missing_fields = [
+        field
+        for field in ("container", "directory", "fileName", "content")
+        if field not in payload
+    ]
+    if missing_fields:
+        raise ValueError(
+            f"Missing required fields: {', '.join(missing_fields)}"
+        )
+
+    for field_name in ("container", "directory", "fileName"):
+        if not isinstance(payload[field_name], str) or not payload[field_name].strip():
+            raise ValueError(f"Field '{field_name}' must be a non-empty string.")
 
 
 def _resolve_source_input(payload: dict) -> dict:

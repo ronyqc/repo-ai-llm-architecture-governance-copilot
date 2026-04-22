@@ -2,7 +2,7 @@
 id: gl-api-versioning
 title: "API Versioning Strategy"
 knowledge_domain: guidelines_patterns
-source_type: guideline
+source_type: markdown_curated
 document_name: api-versioning
 version: "1.0"
 language: "es"

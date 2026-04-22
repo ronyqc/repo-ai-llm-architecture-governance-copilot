@@ -1,8 +1,7 @@
 ---
-id: bian-<slug-unico>
 title: "<Título del dominio BIAN>"
 knowledge_domain: bian
-source_type: bian
+source_type: "<markdown_curated / plain_text / html_page>"
 document_name: "<nombre-logico>"
 version: "1.0"
 language: "es"
