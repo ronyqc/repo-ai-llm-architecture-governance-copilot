@@ -165,7 +165,7 @@ def write_page_to_blob_http(req: func.HttpRequest) -> func.HttpResponse:
     return _json_response(
         {
             "status": "success",
-            "message": "JSON page written to Azure Blob Storage.",
+            "message": "Plain text page written to Azure Blob Storage.",
             "container": result.container_name,
             "blob_name": result.blob_name,
             "blob_url": result.blob_url,

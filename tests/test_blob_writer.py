@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import sys
 import types
@@ -74,7 +73,7 @@ class _FakeBlobServiceClient:
 
 
 class BlobWriterTests(unittest.TestCase):
-    def test_write_page_json_blob_writes_json_file_to_requested_path(self) -> None:
+    def test_write_page_json_blob_writes_txt_file_to_requested_path(self) -> None:
         blob_service_client = _FakeBlobServiceClient()
 
         result = write_page_json_blob(
@@ -87,40 +86,48 @@ class BlobWriterTests(unittest.TestCase):
 
         self.assertEqual(
             blob_service_client.requests,
-            [("pages-container", "confluence/architecture/payments-page.json")],
+            [("pages-container", "confluence/architecture/payments-page.txt")],
         )
-        self.assertEqual(result.file_name, "payments-page.json")
+        self.assertEqual(result.file_name, "payments-page.txt")
         self.assertEqual(
             result.blob_name,
-            "confluence/architecture/payments-page.json",
+            "confluence/architecture/payments-page.txt",
         )
 
         upload_call = blob_service_client.clients[
-            ("pages-container", "confluence/architecture/payments-page.json")
+            ("pages-container", "confluence/architecture/payments-page.txt")
         ].upload_calls[0]
         self.assertTrue(upload_call["overwrite"])
         self.assertEqual(
-            json.loads(upload_call["data"].decode("utf-8")),
-            {"content": "Normalized page content"},
+            upload_call["data"].decode("utf-8"),
+            "Normalized page content",
+        )
+        self.assertEqual(
+            upload_call["content_settings"].content_type,
+            "text/plain; charset=utf-8",
         )
 
-    def test_write_page_json_blob_preserves_dictionary_content(self) -> None:
+    def test_write_page_json_blob_transforms_dictionary_content_to_plain_text(self) -> None:
         blob_service_client = _FakeBlobServiceClient()
 
         write_page_json_blob(
             container_name="pages-container",
             directory="confluence/architecture",
             file_name="payments-page.json",
-            content={"title": "Payments", "content": "Normalized page content"},
+            content={
+                "title": "Payments",
+                "content": "Normalized page content",
+                "tags": ["architecture", "governance"],
+            },
             blob_service_client=blob_service_client,
         )
 
         upload_call = blob_service_client.clients[
-            ("pages-container", "confluence/architecture/payments-page.json")
+            ("pages-container", "confluence/architecture/payments-page.txt")
         ].upload_calls[0]
         self.assertEqual(
-            json.loads(upload_call["data"].decode("utf-8")),
-            {"title": "Payments", "content": "Normalized page content"},
+            upload_call["data"].decode("utf-8"),
+            "title: Payments\n\ncontent: Normalized page content\n\ntags:\n  - architecture\n  - governance",
         )
 
     def test_write_page_json_blob_rejects_file_name_with_path_segments(self) -> None:
