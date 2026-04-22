@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
@@ -44,6 +43,25 @@ def write_page_json_blob(
     blob_service_client: BlobServiceClientProtocol | None = None,
     overwrite: bool = True,
 ) -> BlobWriteResult:
+    return write_page_text_blob(
+        container_name=container_name,
+        directory=directory,
+        file_name=file_name,
+        content=content,
+        blob_service_client=blob_service_client,
+        overwrite=overwrite,
+    )
+
+
+def write_page_text_blob(
+    *,
+    container_name: str,
+    directory: str,
+    file_name: str,
+    content: Any,
+    blob_service_client: BlobServiceClientProtocol | None = None,
+    overwrite: bool = True,
+) -> BlobWriteResult:
     normalized_container = _normalize_container_name(container_name)
     normalized_directory = _normalize_directory(directory)
     normalized_file_name = _normalize_file_name(file_name)
@@ -66,7 +84,7 @@ def write_page_json_blob(
             payload_bytes,
             overwrite=overwrite,
             content_settings=ContentSettings(
-                content_type="application/json; charset=utf-8"
+                content_type="text/plain; charset=utf-8"
             ),
         )
     except Exception as exc:
@@ -115,8 +133,12 @@ def _normalize_file_name(file_name: str) -> str:
     ):
         raise ValueError("Field 'fileName' must not contain path segments.")
 
-    if not normalized.lower().endswith(".json"):
-        normalized = f"{normalized}.json"
+    lowered = normalized.lower()
+    if lowered.endswith(".json"):
+        normalized = normalized[:-5]
+        lowered = normalized.lower()
+    if not lowered.endswith(".txt"):
+        normalized = f"{normalized}.txt"
 
     return normalized
 
@@ -130,12 +152,77 @@ def _build_blob_name(*, directory: str, file_name: str) -> str:
 
 
 def _serialize_page_payload(content: Any) -> bytes:
-    payload = content if isinstance(content, dict) else {"content": content}
     try:
-        serialized = json.dumps(payload, ensure_ascii=False, indent=2)
-    except TypeError as exc:
-        raise ValueError("Field 'content' must be JSON-serializable.") from exc
+        serialized = _render_plain_text(content)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Field 'content' must be serializable to plain text.") from exc
+
+    if not serialized.strip():
+        raise ValueError("Field 'content' must contain serializable text.")
+
     return serialized.encode("utf-8")
+
+
+def _render_plain_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, bool):
+        return "true" if content else "false"
+    if isinstance(content, (int, float)):
+        return str(content)
+    if isinstance(content, dict):
+        return _render_mapping(content)
+    if isinstance(content, (list, tuple, set)):
+        return _render_sequence(content)
+    raise TypeError("Unsupported content type.")
+
+
+def _render_mapping(content: dict[Any, Any]) -> str:
+    parts: list[str] = []
+    for raw_key, value in content.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+
+        rendered_value = _render_plain_text(value).strip()
+        if not rendered_value:
+            continue
+
+        if isinstance(value, dict):
+            parts.append(f"{key}:\n{_indent_text(rendered_value)}")
+            continue
+
+        if isinstance(value, (list, tuple, set)):
+            parts.append(f"{key}:\n{_indent_text(rendered_value)}")
+            continue
+
+        parts.append(f"{key}: {rendered_value}")
+
+    return "\n\n".join(parts)
+
+
+def _render_sequence(content: list[Any] | tuple[Any, ...] | set[Any]) -> str:
+    parts: list[str] = []
+    for item in content:
+        rendered_item = _render_plain_text(item).strip()
+        if not rendered_item:
+            continue
+
+        if "\n" in rendered_item:
+            parts.append(f"-\n{_indent_text(rendered_item)}")
+            continue
+
+        parts.append(f"- {rendered_item}")
+
+    return "\n".join(parts)
+
+
+def _indent_text(value: str) -> str:
+    lines = [line.rstrip() for line in value.splitlines()]
+    non_empty_lines = [line for line in lines if line.strip()]
+    return "\n".join(f"  {line}" for line in non_empty_lines)
 
 
 def _get_storage_connection_string() -> str:

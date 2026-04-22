@@ -36,12 +36,12 @@ def main() -> int:
     parser.add_argument(
         "--file-name",
         required=True,
-        help="Logical file name. The script appends .json if missing.",
+        help="Logical file name. The script saves .txt if missing or if .json is provided.",
     )
     parser.add_argument(
         "--content-json",
         required=True,
-        help="JSON string to write as blob content.",
+        help="JSON string to transform into plain text before writing the blob.",
     )
     args = parser.parse_args()
 
@@ -64,7 +64,7 @@ def main() -> int:
     print(f"blob_url: {result.blob_url}")
     print(f"file_name: {result.file_name}")
 
-    downloaded_payload = _download_blob_json(
+    downloaded_payload = _download_blob_text(
         container_name=result.container_name,
         blob_name=result.blob_name,
     )
@@ -72,15 +72,17 @@ def main() -> int:
     print("-" * 80)
     print("READBACK VALIDATION")
     print("Blob content was downloaded successfully.")
-    print(f"content_keys: {sorted(downloaded_payload.keys())}")
-    print(json.dumps(downloaded_payload, ensure_ascii=False, indent=2))
+    print(downloaded_payload)
 
     expected_file_name = args.file_name
-    if not expected_file_name.lower().endswith(".json"):
-        expected_file_name = f"{expected_file_name}.json"
+    if expected_file_name.lower().endswith(".json"):
+        expected_file_name = expected_file_name[:-5]
+    if not expected_file_name.lower().endswith(".txt"):
+        expected_file_name = f"{expected_file_name}.txt"
 
-    if downloaded_payload != content:
-        raise SystemExit("Validation failed: downloaded payload does not match input JSON.")
+    expected_text = _render_expected_text(content)
+    if downloaded_payload != expected_text:
+        raise SystemExit("Validation failed: downloaded payload does not match expected plain text.")
 
     if result.file_name != expected_file_name:
         raise SystemExit("Validation failed: returned file_name does not match expected value.")
@@ -90,7 +92,7 @@ def main() -> int:
     return 0
 
 
-def _download_blob_json(*, container_name: str, blob_name: str) -> dict:
+def _download_blob_text(*, container_name: str, blob_name: str) -> str:
     connection_string = _get_required_env(
         "AZURE_STORAGE_CONNECTION_STRING",
         "AzureWebJobsStorage",
@@ -100,11 +102,64 @@ def _download_blob_json(*, container_name: str, blob_name: str) -> dict:
         container=container_name,
         blob=blob_name,
     )
-    raw_content = blob_client.download_blob().readall().decode("utf-8")
-    loaded_payload = json.loads(raw_content)
-    if not isinstance(loaded_payload, dict):
-        raise SystemExit("Validation failed: blob payload is not a JSON object.")
-    return loaded_payload
+    return blob_client.download_blob().readall().decode("utf-8")
+
+
+def _render_expected_text(content: object) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, bool):
+        return "true" if content else "false"
+    if isinstance(content, (int, float)):
+        return str(content)
+    if isinstance(content, dict):
+        return _render_mapping(content)
+    if isinstance(content, list):
+        return _render_sequence(content)
+
+    raise SystemExit("Validation failed: unsupported content type.")
+
+
+def _render_mapping(content: dict[object, object]) -> str:
+    parts: list[str] = []
+    for raw_key, value in content.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+
+        rendered_value = _render_expected_text(value).strip()
+        if not rendered_value:
+            continue
+
+        if isinstance(value, (dict, list)):
+            parts.append(f"{key}:\n{_indent_text(rendered_value)}")
+            continue
+
+        parts.append(f"{key}: {rendered_value}")
+
+    return "\n\n".join(parts)
+
+
+def _render_sequence(content: list[object]) -> str:
+    parts: list[str] = []
+    for item in content:
+        rendered_item = _render_expected_text(item).strip()
+        if not rendered_item:
+            continue
+
+        if "\n" in rendered_item:
+            parts.append(f"-\n{_indent_text(rendered_item)}")
+            continue
+
+        parts.append(f"- {rendered_item}")
+
+    return "\n".join(parts)
+
+
+def _indent_text(value: str) -> str:
+    return "\n".join(f"  {line.rstrip()}" for line in value.splitlines() if line.strip())
 
 
 def _load_local_settings() -> None:

@@ -161,12 +161,12 @@ class WritePageBlobFunctionTests(unittest.TestCase):
             "write_page_json_blob",
             return_value=BlobWriteResult(
                 container_name="pages-container",
-                blob_name="confluence/architecture/payments-page.json",
+                blob_name="confluence/architecture/payments-page.txt",
                 blob_url=(
                     "https://account.blob.core.windows.net/"
-                    "pages-container/confluence/architecture/payments-page.json"
+                    "pages-container/confluence/architecture/payments-page.txt"
                 ),
-                file_name="payments-page.json",
+                file_name="payments-page.txt",
             ),
         ) as write_blob_mock:
             response = function_app.write_page_to_blob_http(request)
@@ -175,7 +175,11 @@ class WritePageBlobFunctionTests(unittest.TestCase):
         self.assertEqual(response.mimetype, "application/json")
         response_body = json.loads(response.get_body().decode("utf-8"))
         self.assertEqual(response_body["status"], "success")
-        self.assertEqual(response_body["blob_name"], "confluence/architecture/payments-page.json")
+        self.assertEqual(response_body["blob_name"], "confluence/architecture/payments-page.txt")
+        self.assertEqual(
+            response_body["message"],
+            "Plain text page written to Azure Blob Storage.",
+        )
         write_blob_mock.assert_called_once_with(
             container_name="pages-container",
             directory="confluence/architecture",
