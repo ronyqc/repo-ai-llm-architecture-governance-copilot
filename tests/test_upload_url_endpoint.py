@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import logging
 import unittest
 from unittest.mock import Mock
 
@@ -7,7 +9,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.api.main import app
-from src.api.routes import get_blob_upload_service
+from src.api.routes import get_blob_upload_service, logger as routes_logger
 from src.integrations.blob_upload_service import (
     UploadUrlResult,
     UploadUrlValidationError,
@@ -39,6 +41,15 @@ class UploadUrlEndpointTests(unittest.TestCase):
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
 
+    def _capture_logs(self) -> tuple[io.StringIO, logging.Handler]:
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        formatter = routes_logger.handlers[0].formatter
+        if formatter is not None:
+            handler.setFormatter(formatter)
+        routes_logger.addHandler(handler)
+        return stream, handler
+
     def test_generates_sas_successfully_for_admin(self) -> None:
         response = self.client.post(
             "/api/v1/upload-url",
@@ -53,6 +64,25 @@ class UploadUrlEndpointTests(unittest.TestCase):
         self.upload_service.generate_upload_url.assert_called_once_with(
             file_name="guide.pdf"
         )
+
+    def test_logs_sas_generation_with_structured_metadata(self) -> None:
+        stream, handler = self._capture_logs()
+
+        try:
+            response = self.client.post(
+                "/api/v1/upload-url",
+                json={"file_name": "guide.pdf"},
+            )
+        finally:
+            routes_logger.removeHandler(handler)
+
+        self.assertEqual(response.status_code, 200)
+        output = stream.getvalue()
+        self.assertIn("upload_url.sas.generated", output)
+        self.assertIn('"user_id": "admin-user"', output)
+        self.assertIn('"file_name": "guide.pdf"', output)
+        self.assertIn('"blob_name": "guide.pdf"', output)
+        self.assertIn('"expires_in_seconds": 900', output)
 
     def test_rejects_non_admin_user(self) -> None:
         def _reject_non_admin() -> AuthenticatedUser:

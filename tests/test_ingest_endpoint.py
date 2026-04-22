@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import logging
 import unittest
 from unittest.mock import Mock
 
@@ -7,7 +9,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.api.main import app
-from src.api.routes import get_ingest_service
+from src.api.routes import get_ingest_service, logger as routes_logger
 from src.integrations.blob_ingest_service import (
     IngestExecutionResult,
     IngestNotFoundError,
@@ -34,6 +36,15 @@ class IngestEndpointTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
+
+    def _capture_logs(self) -> tuple[io.StringIO, logging.Handler]:
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        formatter = routes_logger.handlers[0].formatter
+        if formatter is not None:
+            handler.setFormatter(formatter)
+        routes_logger.addHandler(handler)
+        return stream, handler
 
     def _valid_payload(self) -> dict[str, object]:
         return {
@@ -94,11 +105,20 @@ class IngestEndpointTests(unittest.TestCase):
         self.ingest_service.ingest.side_effect = IngestValidationError(
             "knowledge_domain no es válido. Valores permitidos: bian, building_blocks, guidelines_patterns."
         )
+        stream, handler = self._capture_logs()
 
-        response = self.client.post("/api/v1/ingest", json=self._valid_payload())
+        try:
+            response = self.client.post("/api/v1/ingest", json=self._valid_payload())
+        finally:
+            routes_logger.removeHandler(handler)
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("knowledge_domain no es válido", response.json()["detail"])
+        output = stream.getvalue()
+        self.assertIn("ingest.request.rejected", output)
+        self.assertIn('"user_id": "admin-user"', output)
+        self.assertIn('"knowledge_domain": "guidelines_patterns"', output)
+        self.assertIn('"file_name": "architecture-guidelines.md"', output)
 
     def test_ingest_rejects_missing_blob_reference(self) -> None:
         self.ingest_service.ingest.side_effect = IngestNotFoundError(
