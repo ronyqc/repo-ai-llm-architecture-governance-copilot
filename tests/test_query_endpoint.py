@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import logging
 import unittest
 from unittest.mock import Mock
 
@@ -10,6 +12,7 @@ from src.api.routes import (
     get_conversation_store,
     get_guardrail_service,
     get_query_orchestrator,
+    logger as routes_logger,
 )
 from src.core.orchestrator import (
     QueryOrchestrationResult,
@@ -74,6 +77,15 @@ class QueryEndpointTests(unittest.TestCase):
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
 
+    def _capture_logs(self) -> tuple[io.StringIO, logging.Handler]:
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        formatter = routes_logger.handlers[0].formatter
+        if formatter is not None:
+            handler.setFormatter(formatter)
+        routes_logger.addHandler(handler)
+        return stream, handler
+
     def test_query_endpoint_returns_structured_response(self) -> None:
         orchestrator = Mock()
         orchestrator.answer.return_value = QueryOrchestrationResult(
@@ -106,6 +118,45 @@ class QueryEndpointTests(unittest.TestCase):
         self.assertEqual(body["sources"][0]["source_id"], "doc-1")
         self.assertTrue(body["trace_id"])
         self.assertTrue(body["session_id"])
+
+    def test_query_endpoint_emits_structured_start_and_completion_logs(self) -> None:
+        orchestrator = Mock()
+        orchestrator.answer.return_value = QueryOrchestrationResult(
+            answer="Respuesta basada en contexto",
+            sources=[
+                QuerySource(
+                    source_id="doc-1",
+                    source_type="pdf",
+                    title="Architecture Guide",
+                    score=0.93,
+                    knowledge_domain="building_blocks",
+                )
+            ],
+            tokens_used=321,
+        )
+        app.dependency_overrides[get_query_orchestrator] = lambda: orchestrator
+        stream, handler = self._capture_logs()
+
+        try:
+            response = self.client.post(
+                "/api/v1/query",
+                json={
+                    "query": "Que building blocks aplican para autenticacion?",
+                    "session_id": "session-logs",
+                },
+            )
+        finally:
+            routes_logger.removeHandler(handler)
+
+        self.assertEqual(response.status_code, 200)
+        output = stream.getvalue()
+        self.assertIn("query.request.started", output)
+        self.assertIn("query.request.completed", output)
+        self.assertIn('"session_id": "session-logs"', output)
+        self.assertIn('"user_id": "test-user"', output)
+        self.assertIn('"tokens_used": 321', output)
+        self.assertIn('"sources_count": 1', output)
+        self.assertIn('"knowledge_domain": "building_blocks"', output)
 
     def test_query_endpoint_recovers_history_when_session_id_is_provided(self) -> None:
         orchestrator = Mock()
@@ -209,14 +260,18 @@ class QueryEndpointTests(unittest.TestCase):
         )
         app.dependency_overrides[get_query_orchestrator] = lambda: orchestrator
         app.dependency_overrides[get_conversation_store] = lambda: conversation_store
+        stream, handler = self._capture_logs()
 
-        response = self.client.post(
-            "/api/v1/query",
-            json={
-                "query": "Que building blocks aplican para autenticacion?",
-                "session_id": "session-broken",
-            },
-        )
+        try:
+            response = self.client.post(
+                "/api/v1/query",
+                json={
+                    "query": "Que building blocks aplican para autenticacion?",
+                    "session_id": "session-broken",
+                },
+            )
+        finally:
+            routes_logger.removeHandler(handler)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["answer"], "Respuesta sin memoria persistida")
@@ -224,6 +279,10 @@ class QueryEndpointTests(unittest.TestCase):
             session_id="session-broken"
         )
         conversation_store.append_turn.assert_called_once()
+        output = stream.getvalue()
+        self.assertIn("query.history.retrieval_failed", output)
+        self.assertIn("query.history.persistence_failed", output)
+        self.assertIn('"session_id": "session-broken"', output)
 
     def test_query_endpoint_rejects_streaming_for_now(self) -> None:
         response = self.client.post(

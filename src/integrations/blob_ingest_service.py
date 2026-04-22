@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Protocol
@@ -20,7 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal loca
 from src.api.schemas import IngestRequest
 from src.core.config import Settings, settings
 from src.security.auth import AuthenticatedUser
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_event
 
 
 logger = get_logger(__name__)
@@ -226,14 +227,18 @@ class BlobDocumentIngestService:
                 "No se pudo despachar la solicitud de ingesta al contenedor que activa el Blob Trigger."
             ) from exc
 
-        logger.info(
-            "Ingest request dispatched to blob trigger container. trace_id=%s source=%s/%s destination=%s/%s user_id=%s",
-            trace_id,
-            source_reference.container_name,
-            source_reference.blob_name,
-            self._destination_container,
-            destination_blob_name,
-            user.user_id,
+        log_event(
+            logger,
+            logging.INFO,
+            "ingest.request.dispatched",
+            trace_id=trace_id,
+            user_id=user.user_id,
+            knowledge_domain=normalized_domain,
+            file_name=source_reference.file_name,
+            source_container=source_reference.container_name,
+            source_blob_name=source_reference.blob_name,
+            destination_container=self._destination_container,
+            destination_blob_name=destination_blob_name,
         )
         return IngestExecutionResult(
             trace_id=trace_id,

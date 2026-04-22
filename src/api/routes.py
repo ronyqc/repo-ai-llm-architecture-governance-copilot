@@ -1,3 +1,4 @@
+import logging
 from time import perf_counter
 from uuid import uuid4
 
@@ -62,7 +63,7 @@ from src.security.guardrails import (
     GuardrailService,
     GuardrailViolation,
 )
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, log_event
 
 
 router = APIRouter()
@@ -123,6 +124,7 @@ def query_copilot(
     session_id = payload.session_id or str(uuid4())
     trace_id = str(uuid4())
     conversation_history: list[ConversationContextTurn] = []
+    query_preview = _build_query_preview(payload.query)
 
     if payload.stream:
         raise HTTPException(
@@ -132,29 +134,35 @@ def query_copilot(
 
     try:
         client_host = request.client.host if request.client is not None else "unknown"
+        log_event(
+            logger,
+            logging.INFO,
+            "query.request.started",
+            trace_id=trace_id,
+            session_id=session_id,
+            user_id=user.user_id,
+            query_preview=query_preview,
+        )
         validated_query = guardrail_service.protect_query(
             query=payload.query,
             identity=f"{user.user_id}:{client_host}",
         )
     except GuardrailViolation as exc:
-        logger.warning(
-            "Query blocked by guardrails. trace_id=%s user_id=%s status_code=%s reason=%s",
-            trace_id,
-            user.user_id,
-            exc.status_code,
-            str(exc),
+        log_event(
+            logger,
+            logging.WARNING,
+            "query.request.blocked_guardrails",
+            trace_id=trace_id,
+            session_id=session_id,
+            user_id=user.user_id,
+            status_code=exc.status_code,
+            reason=str(exc),
+            query_preview=query_preview,
         )
         raise HTTPException(
             status_code=exc.status_code,
             detail=str(exc),
         ) from exc
-
-    logger.info(
-        "Query request received. trace_id=%s session_id=%s query_preview=%s",
-        trace_id,
-        session_id,
-        validated_query.sanitized_query[:120],
-    )
 
     if payload.session_id:
         try:
@@ -168,10 +176,14 @@ def query_copilot(
                 for turn in persisted_turns
             ]
         except ConversationStoreError:
-            logger.exception(
-                "Conversation history unavailable. trace_id=%s session_id=%s",
-                trace_id,
-                session_id,
+            log_event(
+                logger,
+                logging.ERROR,
+                "query.history.retrieval_failed",
+                trace_id=trace_id,
+                session_id=session_id,
+                user_id=user.user_id,
+                exc_info=True,
             )
 
     try:
@@ -228,13 +240,18 @@ def query_copilot(
         ) from exc
 
     latency_ms = (perf_counter() - start_time) * 1000
-    logger.info(
-        "Query request completed. trace_id=%s session_id=%s tokens_used=%s sources=%s latency_ms=%.2f",
-        trace_id,
-        session_id,
-        result.tokens_used,
-        len(result.sources),
-        latency_ms,
+    primary_knowledge_domain = _resolve_primary_knowledge_domain(result.sources)
+    log_event(
+        logger,
+        logging.INFO,
+        "query.request.completed",
+        trace_id=trace_id,
+        session_id=session_id,
+        user_id=user.user_id,
+        latency_ms=round(latency_ms, 2),
+        tokens_used=result.tokens_used,
+        sources_count=len(result.sources),
+        knowledge_domain=primary_knowledge_domain,
     )
 
     try:
@@ -245,7 +262,7 @@ def query_copilot(
                 assistant_answer=result.answer,
                 created_at=build_created_at_timestamp(),
                 trace_id=trace_id,
-                knowledge_domain=_resolve_primary_knowledge_domain(result.sources),
+                knowledge_domain=primary_knowledge_domain,
                 tokens_used=result.tokens_used,
                 latency_ms=latency_ms,
                 sources=[
@@ -261,10 +278,18 @@ def query_copilot(
             )
         )
     except ConversationStoreError:
-        logger.exception(
-            "Conversation turn was not persisted. trace_id=%s session_id=%s",
-            trace_id,
-            session_id,
+        log_event(
+            logger,
+            logging.ERROR,
+            "query.history.persistence_failed",
+            trace_id=trace_id,
+            session_id=session_id,
+            user_id=user.user_id,
+            latency_ms=round(latency_ms, 2),
+            tokens_used=result.tokens_used,
+            sources_count=len(result.sources),
+            knowledge_domain=primary_knowledge_domain,
+            exc_info=True,
         )
 
     return QueryResponse(
@@ -293,6 +318,13 @@ def _resolve_primary_knowledge_domain(sources: list[object]) -> str:
     return ""
 
 
+def _build_query_preview(query: str, limit: int = 120) -> str:
+    compact = " ".join(query.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
+
+
 @router.post(
     "/api/v1/upload-url",
     response_model=UploadUrlResponse,
@@ -305,16 +337,28 @@ def create_upload_url(
     try:
         result = upload_service.generate_upload_url(file_name=payload.file_name)
     except UploadUrlServiceError as exc:
-        logger.warning(
-            "Upload URL request rejected. user_id=%s file_name=%s error=%s",
-            user.user_id,
-            payload.file_name,
-            str(exc),
+        log_event(
+            logger,
+            logging.WARNING,
+            "upload_url.request.rejected",
+            user_id=user.user_id,
+            file_name=payload.file_name,
+            error=str(exc),
         )
         raise HTTPException(
             status_code=exc.status_code,
             detail=str(exc),
         ) from exc
+
+    log_event(
+        logger,
+        logging.INFO,
+        "upload_url.sas.generated",
+        user_id=user.user_id,
+        file_name=payload.file_name,
+        blob_name=result.blob_name,
+        expires_in_seconds=result.expires_in_seconds,
+    )
 
     return UploadUrlResponse(
         upload_url=result.upload_url,
@@ -343,11 +387,15 @@ def ingest_document(
             trace_id=trace_id,
         )
     except IngestServiceError as exc:
-        logger.warning(
-            "Ingest request rejected. trace_id=%s user_id=%s error=%s",
-            trace_id,
-            user.user_id,
-            str(exc),
+        log_event(
+            logger,
+            logging.WARNING,
+            "ingest.request.rejected",
+            trace_id=trace_id,
+            user_id=user.user_id,
+            knowledge_domain=payload.knowledge_domain,
+            file_name=payload.file_name,
+            error=str(exc),
         )
         raise HTTPException(
             status_code=exc.status_code,

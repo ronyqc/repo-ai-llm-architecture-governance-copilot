@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import logging
 import unittest
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
@@ -10,6 +12,7 @@ from src.integrations.blob_ingest_service import (
     IngestConflictError,
     IngestNotFoundError,
     IngestValidationError,
+    logger as ingest_logger,
 )
 from src.security.auth import AuthenticatedUser
 
@@ -117,6 +120,15 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
         values.update(overrides)
         return IngestRequest(**values)
 
+    def _capture_logs(self) -> tuple[io.StringIO, logging.Handler]:
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        formatter = ingest_logger.handlers[0].formatter
+        if formatter is not None:
+            handler.setFormatter(formatter)
+        ingest_logger.addHandler(handler)
+        return stream, handler
+
     def test_ingest_copies_existing_blob_to_trigger_container(self) -> None:
         source_blob = _FakeBlobClient(
             url="https://account.blob.core.windows.net/documents-raw/guidelines/architecture-guidelines.md",
@@ -159,6 +171,42 @@ class BlobDocumentIngestServiceTests(unittest.TestCase):
                 "agc_requested_domain": "guidelines_patterns",
             },
         )
+
+    def test_ingest_logs_dispatch_with_structured_metadata(self) -> None:
+        source_blob = _FakeBlobClient(
+            url="https://account.blob.core.windows.net/documents-raw/guidelines/architecture-guidelines.md",
+            payload=b"# Architecture Guidelines",
+        )
+        destination_blob = _FakeBlobClient(
+            url="https://account.blob.core.windows.net/documents-processed/admin-ingest/architecture-guidelines.md"
+        )
+        self.blob_service.add_blob_client(
+            container="documents-raw",
+            blob="guidelines/architecture-guidelines.md",
+            client=source_blob,
+        )
+        self.blob_service.add_blob_client(
+            container="documents-processed",
+            blob="admin-ingest/architecture-guidelines.md",
+            client=destination_blob,
+        )
+        stream, handler = self._capture_logs()
+
+        try:
+            self.service.ingest(
+                payload=self._payload(),
+                user=self.user,
+                trace_id="trace-123",
+            )
+        finally:
+            ingest_logger.removeHandler(handler)
+
+        output = stream.getvalue()
+        self.assertIn("ingest.request.dispatched", output)
+        self.assertIn('"trace_id": "trace-123"', output)
+        self.assertIn('"user_id": "user-123"', output)
+        self.assertIn('"knowledge_domain": "guidelines_patterns"', output)
+        self.assertIn('"destination_blob_name": "admin-ingest/architecture-guidelines.md"', output)
 
     def test_ingest_rejects_invalid_knowledge_domain(self) -> None:
         with self.assertRaises(IngestValidationError) as context:
