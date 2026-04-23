@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import os
 
-from azure.core.credentials import AzureKeyCredential
-from azure.search.documents import SearchClient
+try:
+    from azure.core.credentials import AzureKeyCredential
+    from azure.search.documents import SearchClient
+except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal local envs
+    AzureKeyCredential = None
+    SearchClient = None
 
 
 ALLOWED_KNOWLEDGE_DOMAINS = {
@@ -35,6 +39,10 @@ def index_chunks(chunks: list[dict]) -> dict:
     index_name = _get_required_env("AZURE_SEARCH_INDEX")
 
     _validate_chunks(chunks)
+    if SearchClient is None or AzureKeyCredential is None:
+        raise RuntimeError(
+            "azure-search-documents and azure-core must be installed to index chunks."
+        )
 
     client = SearchClient(
         endpoint=endpoint,

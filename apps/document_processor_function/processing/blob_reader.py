@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 
-from azure.storage.blob import BlobServiceClient
+try:
+    from azure.storage.blob import BlobServiceClient
+except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal local envs
+    BlobServiceClient = None
 
 
 def read_blob_bytes(container_name: str, blob_name: str) -> dict:
@@ -13,6 +16,10 @@ def read_blob_bytes(container_name: str, blob_name: str) -> dict:
         raise ValueError("blob_name is required.")
 
     connection_string = _get_required_env("AZURE_STORAGE_CONNECTION_STRING")
+    if BlobServiceClient is None:
+        raise RuntimeError(
+            "azure-storage-blob must be installed to read blob content."
+        )
     service_client = BlobServiceClient.from_connection_string(connection_string)
     blob_client = service_client.get_blob_client(
         container=container_name.strip(),

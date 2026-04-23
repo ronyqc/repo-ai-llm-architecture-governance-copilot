@@ -4,7 +4,10 @@ import json
 import os
 from typing import Any
 
-from openai import AzureOpenAI
+try:
+    from openai import AzureOpenAI
+except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal local envs
+    AzureOpenAI = None
 
 
 EMBEDDING_MODEL_NAME = "text-embedding-3-large"
@@ -20,6 +23,10 @@ def generate_embedding(text: str) -> list[float]:
     api_version = _get_required_env("AZURE_OPENAI_API_VERSION")
     deployment = _get_required_env("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT")
     dimensions = _get_dimensions()
+    if AzureOpenAI is None:
+        raise RuntimeError(
+            "openai must be installed to generate embeddings."
+        )
 
     client = AzureOpenAI(
         azure_endpoint=endpoint,

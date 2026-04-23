@@ -120,12 +120,17 @@ class BlobUploadUrlService:
             blob=normalized_file_name,
         )
         expires_on = self._clock() + timedelta(seconds=self._expires_in_seconds)
+        permission = (
+            {"create": True, "write": True}
+            if BlobSasPermissions is Any
+            else BlobSasPermissions(create=True, write=True)
+        )
         sas_token = self._sas_generator(
             account_name=self._account_name,
             account_key=self._account_key,
             container_name=self._raw_container_name,
             blob_name=normalized_file_name,
-            permission=BlobSasPermissions(create=True, write=True),
+            permission=permission,
             expiry=expires_on,
             protocol="https",
         )

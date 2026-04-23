@@ -5,7 +5,14 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Protocol
 
-from azure.storage.blob import BlobServiceClient, ContentSettings
+try:
+    from azure.storage.blob import BlobServiceClient, ContentSettings
+except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal local envs
+    BlobServiceClient = None
+
+    class ContentSettings:  # type: ignore[override]
+        def __init__(self, *, content_type: str) -> None:
+            self.content_type = content_type
 
 
 @dataclass(frozen=True)
@@ -71,9 +78,16 @@ def write_page_text_blob(
     )
     payload_bytes = _serialize_page_payload(content)
 
-    service_client = blob_service_client or BlobServiceClient.from_connection_string(
-        _get_storage_connection_string()
-    )
+    if blob_service_client is None:
+        if BlobServiceClient is None:
+            raise RuntimeError(
+                "azure-storage-blob must be installed to write page blobs."
+            )
+        service_client = BlobServiceClient.from_connection_string(
+            _get_storage_connection_string()
+        )
+    else:
+        service_client = blob_service_client
     blob_client = service_client.get_blob_client(
         container=normalized_container,
         blob=blob_name,
