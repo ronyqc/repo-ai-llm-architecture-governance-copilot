@@ -1,0 +1,10 @@
+exclude_dirs:
+  - .git
+  - .pytest_cache
+  - .venv
+  - corpus
+  - frontend
+  - htmlcov
+  - notebooks
+  - reports
+  - tests

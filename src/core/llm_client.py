@@ -135,7 +135,7 @@ class AzureOpenAILLMClient:
     def check_health(self, timeout_seconds: float) -> None:
         query = parse.urlencode({"api-version": self._api_version})
         encoded_deployment = parse.quote(self._deployment, safe="")
-        url = (
+        url = _ensure_https_url(
             f"{self._endpoint}/openai/deployments/{encoded_deployment}/chat/completions"
             f"?{query}"
         )
@@ -159,7 +159,7 @@ class AzureOpenAILLMClient:
             method="POST",
         )
         try:
-            with request.urlopen(req, timeout=timeout_seconds) as response:
+            with request.urlopen(req, timeout=timeout_seconds) as response:  # nosec B310
                 if int(getattr(response, "status", 200) or 200) >= 400:
                     raise AzureOpenAILLMError(
                         "Azure OpenAI health check returned an unexpected status."
@@ -239,3 +239,12 @@ class AzureOpenAILLMClient:
             or inner_code == "responsibleaipolicyviolation"
             or jailbreak_detected
         )
+
+
+def _ensure_https_url(url: str) -> str:
+    parsed = parse.urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise AzureOpenAILLMConfigurationError(
+            "Azure OpenAI endpoint must resolve to a valid HTTPS URL."
+        )
+    return url
