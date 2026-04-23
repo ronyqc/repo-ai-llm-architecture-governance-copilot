@@ -4,14 +4,14 @@ import io
 import logging
 import unittest
 
-from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
-
 from src.api.schemas import IngestRequest
 from src.integrations.blob_ingest_service import (
     BlobDocumentIngestService,
     IngestConflictError,
     IngestNotFoundError,
     IngestValidationError,
+    ResourceExistsError,
+    ResourceNotFoundError,
     logger as ingest_logger,
 )
 from src.security.auth import AuthenticatedUser
