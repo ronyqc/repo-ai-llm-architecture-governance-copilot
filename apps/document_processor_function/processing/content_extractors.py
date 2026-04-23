@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from defusedxml import ElementTree
 from io import BytesIO
 from pathlib import PurePosixPath
 import zipfile
-from xml.etree import ElementTree
 
 
 SUPPORTED_FILE_SOURCE_TYPES = {

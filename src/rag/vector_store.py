@@ -147,7 +147,7 @@ class AzureSearchVectorStore:
     def check_health(self, timeout_seconds: float) -> None:
         api_version = settings.AZURE_SEARCH_API_VERSION
         encoded_index = parse.quote(self._index_name, safe="")
-        url = (
+        url = _ensure_https_url(
             f"{self._endpoint}/indexes('{encoded_index}')"
             f"?{parse.urlencode({'api-version': api_version})}"
         )
@@ -159,7 +159,7 @@ class AzureSearchVectorStore:
             },
         )
         try:
-            with request.urlopen(req, timeout=timeout_seconds) as response:
+            with request.urlopen(req, timeout=timeout_seconds) as response:  # nosec B310
                 if int(getattr(response, "status", 200) or 200) >= 400:
                     raise AzureSearchQueryError(
                         "Azure AI Search health check returned an unexpected status."
@@ -266,3 +266,12 @@ class AzureSearchVectorStore:
             chunk_id=result.get("chunk_id"),
             updated_at=result.get("updated_at"),
         )
+
+
+def _ensure_https_url(url: str) -> str:
+    parsed = parse.urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise AzureSearchConfigurationError(
+            "Azure AI Search endpoint must resolve to a valid HTTPS URL."
+        )
+    return url
