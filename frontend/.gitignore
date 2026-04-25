@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+frontend/.env.*.local

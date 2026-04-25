@@ -10,4 +10,4 @@ omit =
 skip_empty = True
 
 [xml]
-output = reports/coverage-full.xml
+output = reports/coverage.xml
