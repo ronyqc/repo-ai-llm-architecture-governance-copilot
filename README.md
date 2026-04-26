@@ -2,115 +2,178 @@
 
 Copiloto de arquitectura basado en AI/LLM y RAG para apoyar la revisión conceptual de soluciones en una organización financiera. El sistema permite consultar conocimiento arquitectónico indexado, recuperar fuentes relevantes y generar recomendaciones sobre building blocks, lineamientos y posibles alineamientos BIAN.
 
+---
+
 ## Arquitectura
 
-La solución se compone de un frontend en Azure Static Web Apps, un backend FastAPI desplegado en Azure Container Apps, autenticación con Microsoft Entra ID mediante JWT, Azure OpenAI para generación de respuestas y embeddings, Azure AI Search como vector store, Azure Blob Storage para documentos fuente y Azure Functions para el procesamiento de ingesta documental.
+La solución se compone de:
+
+- Frontend: Azure Static Web Apps  
+- Backend: FastAPI desplegado en Azure Container Apps  
+- Autenticación: Microsoft Entra ID (JWT)  
+- LLM: Azure OpenAI  
+- Vector Store: Azure AI Search  
+- Ingesta: Azure Blob Storage + Azure Functions  
+
+---
 
 ## URLs de despliegue
 
 ### Frontend
-
-https://icy-pond-021121e0f.7.azurestaticapps.net
+https://icy-pond-021121e0f.7.azurestaticapps.net  
 
 ### Backend API
-
-https://agc-api-mvp.graycoast-cbfe8a60.centralus.azurecontainerapps.io
+https://agc-api-mvp.graycoast-cbfe8a60.centralus.azurecontainerapps.io  
 
 ### Swagger / OpenAPI
+https://agc-api-mvp.graycoast-cbfe8a60.centralus.azurecontainerapps.io/docs  
 
-https://agc-api-mvp.graycoast-cbfe8a60.centralus.azurecontainerapps.io/docs
+---
 
-## Endpoints principales
+## Validación rápida (menos de 5 minutos)
 
-| Método | Endpoint | Descripción | Seguridad |
-|---|---|---|---|
-| GET | `/api/v1/health` | Estado del backend y dependencias | Público |
-| POST | `/api/v1/query` | Ejecuta consulta RAG y retorna respuesta con fuentes | JWT |
-| POST | `/api/v1/ingest` | Registra o dispara ingesta de documentos | JWT admin |
-| POST | `/api/v1/upload-url` | Genera URL SAS para carga de archivo a Blob Storage | JWT admin |
-
-## Validación rápida en cloud
-
-### Health
+### Verificar estado del sistema
 
 ```bash
 curl https://agc-api-mvp.graycoast-cbfe8a60.centralus.azurecontainerapps.io/api/v1/health
+```
+
 Respuesta esperada:
 
+```json
 {
   "status": "healthy",
   "components": {
     "backend": "healthy",
     "azure_openai": "healthy",
-    "azure_ai_search": "healthy",
-    "confluence": "healthy"
+    "azure_ai_search": "healthy"
   }
 }
+```
 
-Flujo funcional validado
+### Probar desde el frontend
 
-El sistema desplegado permite ejecutar el siguiente flujo end-to-end:
+1. Acceder al frontend  
+2. Autenticarse con Microsoft Entra ID  
+3. Ejecutar una consulta  
+4. Ver respuesta con fuentes  
 
-Acceso al frontend publicado en Azure Static Web Apps.
-Autenticación del usuario mediante Microsoft Entra ID.
-Generación de URL SAS mediante /api/v1/upload-url.
-Carga de documento al contenedor raw-corpus en Azure Blob Storage.
-Registro de ingesta mediante /api/v1/ingest.
-Procesamiento del documento mediante Azure Functions.
-Generación de chunks, embeddings e indexación en Azure AI Search.
-Consulta mediante /api/v1/query.
-Recuperación de respuesta generada con fuentes del documento indexado.
+---
 
+## Flujo funcional validado
 
-Requisitos para ejecución local
-Python 3.11+
-Docker y Docker Compose
-Node.js 20+ para frontend local
-Cuenta de Azure con acceso a:
-Azure OpenAI
-Azure AI Search
-Azure Storage Account
-Azure Functions
-Azure Container Apps
-Azure Static Web Apps
-Microsoft Entra ID
-Archivo .env creado a partir de .env.example con las variables reales del entorno.
+- Autenticación del usuario  
+- Generación de URL SAS  
+- Carga de documento a Blob Storage  
+- Ingesta mediante endpoint `/ingest`  
+- Procesamiento con Azure Functions  
+- Generación de embeddings  
+- Indexación en Azure AI Search  
+- Consulta mediante `/query`  
+- Respuesta con fuentes  
 
+---
 
-Instalación local
+## Resultados reales del sistema
+
+### Calidad del LLM (RAG)
+
+| Métrica | Resultado |
+|--------|----------|
+| Faithfulness | 0.80 |
+| Answer Relevancy | 0.80 |
+| Context Precision | 0.80 |
+
+### Pruebas de carga
+
+| Métrica | Resultado |
+|--------|----------|
+| Latencia p95 | 6.3 s |
+| Tasa de error | 86% |
+| Error principal | HTTP 429 |
+
+### Cobertura de pruebas
+
+- Coverage: 83.18%  
+- Tests: 119 passed / 1 skipped  
+
+---
+
+## Ejecución local
+
+### Requisitos
+
+- Python 3.11+  
+- Docker  
+- Node.js 20+  
+- Cuenta Azure  
+
+### Backend
+
+```bash
 git clone https://github.com/ronyqc/repo-ai-llm-architecture-governance-copilot.git
 cd repo-ai-llm-architecture-governance-copilot
 cp .env.example .env
+docker compose up --build
+```
 
-Editar .env con los valores reales de Azure OpenAI, Azure AI Search, Azure Storage, Confluence y Microsoft Entra ID.
+### Frontend
 
-Ejecución local del backend
-docker compose build
-docker compose up
-
-Validar health local:
-curl http://localhost:8000/api/v1/health
-
-Ejecución local del frontend
+```bash
 cd frontend
 npm install
 npm run dev
+```
 
 Abrir:
+
 http://localhost:5173
 
-Pruebas
+---
+
+## Pruebas
+
+```bash
 make test
+```
 
-Verificación de archivos obligatorios
-make check-files
+---
 
-Video demo
-Pendiente de incorporar en E4.
+## Validación final
 
-Participantes
-Rony Lexter Quiroz Castillo
-José Luis Rodríguez Prieto
+```bash
+make pre-delivery
+```
 
-Curso
+---
+
+## Consideraciones de seguridad
+
+- No se incluyen credenciales reales en el repositorio  
+- Uso de `.env.example` como plantilla  
+- Autenticación mediante JWT (Microsoft Entra ID)  
+
+---
+
+## Modo recomendado de evaluación
+
+Se recomienda utilizar el entorno cloud desplegado, ya que la ejecución local completa requiere credenciales y recursos Azure previamente configurados.
+
+---
+
+## Video demo
+
+Pendiente de incorporación en Entregable 4.
+
+---
+
+## Equipo
+
+- Rony Lexter Quiroz Castillo  
+- José Luis Rodríguez Prieto  
+
+---
+
+## Curso
+
 Proyecto Final — AI/LLM Solution Architect
