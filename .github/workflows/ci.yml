@@ -1,18 +1,67 @@
-name: CI - Base Validation
+name: CI - E3 Validation
 
 on:
   push:
     branches:
       - main
       - develop
+      - "ci/**"
+      - "test/**"
+      - "feat/**"
+      - "chore/**"
   pull_request:
     branches:
       - main
       - develop
+  workflow_dispatch:
 
 jobs:
   validate:
+    name: Validate, test and build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      ENVIRONMENT: testing
+      LOG_LEVEL: INFO
+      USE_LLM_MOCK: "true"
+
+      AZURE_OPENAI_ENDPOINT: https://example.openai.azure.com/
+      AZURE_OPENAI_API_KEY: test-key
+      AZURE_OPENAI_API_VERSION: "2024-02-01"
+      AZURE_OPENAI_DEPLOYMENT: test-chat
+      AZURE_OPENAI_ROUTER_DEPLOYMENT: test-chat
+      AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT: test-embeddings
+      AZURE_OPENAI_EMBEDDINGS_DIMENSIONS: "1536"
+
+      AZURE_SEARCH_ENDPOINT: https://example.search.windows.net
+      AZURE_SEARCH_KEY: test-key
+      AZURE_SEARCH_INDEX: test-index
+      AZURE_SEARCH_VECTOR_FIELD: content_vector
+      AZURE_SEARCH_TOP_K: "5"
+      AZURE_SEARCH_SCORE_THRESHOLD: "0.2"
+
+      AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test;EndpointSuffix=core.windows.net
+      RAW_UPLOAD_CONTAINER_NAME: raw-corpus
+      DOCUMENTS_CONTAINER_NAME: staging-ingest
+      INGEST_DESTINATION_PREFIX: admin-ingest
+      INGEST_ALLOWED_SOURCE_CONTAINERS: raw-corpus
+      INGEST_ALLOWED_KNOWLEDGE_DOMAINS: bian,building_blocks,guidelines_patterns
+
+      AZURE_TABLE_CONVERSATION_TABLE_NAME: ConversationHistory
+      QUERY_HISTORY_MAX_TURNS: "3"
+
+      CONFLUENCE_BASE_URL: https://example.atlassian.net/wiki
+      CONFLUENCE_EMAIL: test@example.com
+      CONFLUENCE_API_TOKEN: test-token
+      CONFLUENCE_DEFAULT_SPACE_KEY: AGC
+
+      AZURE_TENANT_ID: 00000000-0000-0000-0000-000000000000
+      AZURE_CLIENT_ID: 00000000-0000-0000-0000-000000000000
+      AZURE_API_AUDIENCE: api://00000000-0000-0000-0000-000000000000
+      AZURE_JWKS_URL: https://login.microsoftonline.com/common/discovery/v2.0/keys
+      REQUIRE_ADMIN_FOR_INGEST: "true"
+      INGEST_ADMIN_ROLES: admin
 
     steps:
       - name: Checkout repository
@@ -22,26 +71,43 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
+          cache: pip
 
       - name: Install dependencies
         run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "requirements.txt not found"
-            exit 1
-          fi
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-mock
 
-      - name: Validate project structure
+      - name: Validate required files
         run: |
           test -f README.md
           test -f .env.example
           test -f Dockerfile
           test -f docker-compose.yml
           test -f src/api/main.py
+          test -f src/api/routes.py
 
-      - name: Basic Python compile check
-        run: python -m compileall src
+      - name: Compile Python source
+        run: python -m compileall src apps
+
+      - name: Run tests with coverage
+        run: |
+          mkdir -p reports
+          pytest tests \
+            --ignore=tests/scripts \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml:reports/coverage.xml \
+            --cov-fail-under=60 \
+            -W ignore::DeprecationWarning
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: reports/coverage.xml
+
+      - name: Docker build
+        run: docker build --target runtime -t agc-api-ci:latest .
