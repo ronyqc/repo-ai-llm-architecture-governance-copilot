@@ -163,7 +163,7 @@ Se recomienda utilizar el entorno cloud desplegado, ya que la ejecución local c
 
 ## Video demo
 
-Pendiente de incorporación en Entregable 4.
+https://youtu.be/i3ikdznXASw
 
 ---
 
