@@ -1,0 +1,89 @@
+{
+  "evaluation_type": "manual_structured_rag_evaluation",
+  "note": "Evaluación estructurada del pipeline RAG ejecutada contra el backend cloud. Las métricas se calculan con criterios determinísticos basados en presencia de fuentes, relevancia por keywords esperadas y consistencia básica de respuesta.",
+  "generated_at": "2026-04-26T00:07:40.916747+00:00",
+  "api_base_url": "https://agc-api-mvp.graycoast-cbfe8a60.centralus.azurecontainerapps.io",
+  "dataset_size": 5,
+  "metrics": {
+    "faithfulness": 0.8,
+    "answer_relevancy": 0.8,
+    "context_precision": 0.8
+  },
+  "thresholds": {
+    "faithfulness": 0.75,
+    "answer_relevancy": 0.7,
+    "context_precision": 0.7
+  },
+  "passed": {
+    "faithfulness": true,
+    "answer_relevancy": true,
+    "context_precision": true
+  },
+  "results": [
+    {
+      "id": "q1",
+      "question": "Según el documento Demo RAG Entregable 3.3, ¿qué building blocks se recomiendan para la apertura digital de tarjeta de crédito?",
+      "answer_preview": "## 1. Resumen del caso\n\nEl caso de uso corresponde a la apertura digital de una tarjeta de crédito, donde un cliente solicita el producto a través de un canal digital. El proceso requiere autenticación, validación de elegibilidad, evaluación de riesgo crediticio, generación de acuerdos y emisión de ",
+      "sources_count": 4,
+      "latency_ms": 7038.19,
+      "trace_id": "502a6218-0a19-4566-8693-c77b2ef804cb",
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "id": "q2",
+      "question": "¿Qué dominios BIAN podrían alinearse con una apertura digital de tarjeta de crédito?",
+      "answer_preview": "## 1. Resumen del caso\nSe solicita identificar los dominios BIAN que podrían alinearse con el proceso de apertura digital de una tarjeta de crédito, considerando la evidencia recuperada sobre building blocks, lineamientos y dominios relevantes.\n\n## 2. Hallazgos relevantes\n- El proceso de apertura di",
+      "sources_count": 4,
+      "latency_ms": 6696.67,
+      "trace_id": "1420f757-927c-4b27-8c98-a0c9d9c703dd",
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "id": "q3",
+      "question": "¿Qué fuentes utiliza el copiloto para sustentar sus recomendaciones?",
+      "answer_preview": "La consulta se encuentra fuera del alcance del Architecture Governance Copilot.",
+      "sources_count": 0,
+      "latency_ms": 2179.31,
+      "trace_id": "8cc1c0aa-5bce-4ded-a276-f57a386e4a20",
+      "scores": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.0,
+        "context_precision": 0.0
+      }
+    },
+    {
+      "id": "q4",
+      "question": "¿Qué recomendaciones arquitectónicas aplican para un caso de onboarding digital?",
+      "answer_preview": "## 1. Resumen del caso\n\nSe solicita identificar recomendaciones arquitectónicas aplicables para un caso de onboarding digital en el sector financiero. El contexto recuperado es parcial y tangencial, principalmente relacionado con la apertura digital de productos financieros (tarjeta de crédito) y li",
+      "sources_count": 4,
+      "latency_ms": 6394.23,
+      "trace_id": "d812ae98-200c-4586-a9aa-48db8fac2c29",
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 1.0,
+        "context_precision": 1.0
+      }
+    },
+    {
+      "id": "q5",
+      "question": "¿Qué lineamientos debería considerar una solución de arquitectura para reutilizar capacidades existentes?",
+      "answer_preview": "## 1. Resumen del caso\n\nEl usuario solicita lineamientos que deberían considerarse en una solución de arquitectura para reutilizar capacidades existentes, con énfasis en la reutilización de building blocks y alineamiento a buenas prácticas de gobierno de arquitectura.\n\n## 2. Hallazgos relevantes\n\n- ",
+      "sources_count": 5,
+      "latency_ms": 6998.45,
+      "trace_id": "35b02a19-32e8-43f9-a128-79571c8192a0",
+      "scores": {
+        "faithfulness": 1.0,
+        "answer_relevancy": 1.0,
+        "context_precision": 1.0
+      }
+    }
+  ]
+}

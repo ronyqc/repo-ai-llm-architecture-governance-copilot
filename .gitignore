@@ -83,3 +83,12 @@ data/processed/
 *.sqlite
 tmp/
 temp/
+local.settings.json
+apps/document_processor_function/local.settings.json
+
+
+frontend/node_modules/
+frontend/node_modules/**
+**/node_modules/
+**/node_modules/**
+frontend/dist/

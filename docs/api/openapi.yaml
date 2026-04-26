@@ -1,0 +1,271 @@
+openapi: 3.1.0
+info:
+  title: Architecture Governance Copilot API
+  version: 1.0.0
+  description: API para consultar el copiloto y registrar solicitudes de ingesta de documentos.
+
+servers:
+  - url: http://localhost:8000
+    description: Desarrollo local
+
+paths:
+  /api/v1/health:
+    get:
+      summary: Verificar estado del servicio
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Estado general del servicio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: healthy
+                components:
+                  backend: healthy
+                  azure_openai: healthy
+                  azure_ai_search: healthy
+                  confluence: healthy
+                timestamp: "2026-04-05T12:00:00Z"
+
+  /api/v1/query:
+    post:
+      summary: Consultar el copiloto de arquitectura
+      operationId: queryCopilot
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueryRequest"
+            example:
+              query: "Cuales son los principios de arquitectura recomendados para integracion?"
+              session_id: null
+              stream: false
+      responses:
+        "200":
+          description: Respuesta generada correctamente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResponse"
+              example:
+                answer: "Respuesta simulada para el copiloto de arquitectura"
+                sources: []
+                tokens_used: 0
+                latency_ms: 0.15
+                trace_id: "550e8400-e29b-41d4-a716-446655440000"
+                session_id: "550e8400-e29b-41d4-a716-446655440001"
+        "400":
+          description: Solicitud invalida
+        "401":
+          description: No autenticado
+        "422":
+          description: Error de validacion
+        "429":
+          description: Demasiadas solicitudes
+        "503":
+          description: Servicio no disponible
+
+  /api/v1/ingest:
+    post:
+      summary: Registrar una solicitud administrativa de ingesta
+      operationId: ingestDocument
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestRequest"
+            example:
+              file_name: "architecture-guidelines.md"
+              file_url: "blob://documents-raw/guidelines/architecture-guidelines.md"
+              knowledge_domain: "guidelines_patterns"
+              metadata:
+                source_system: "sharepoint"
+                owner: "enterprise-architecture"
+      responses:
+        "202":
+          description: Ingesta aceptada y despachada al pipeline por Blob Trigger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+              example:
+                status: accepted
+                message: "Ingest accepted and dispatched to the blob-trigger pipeline."
+                trace_id: "550e8400-e29b-41d4-a716-446655440002"
+        "400":
+          description: Solicitud invalida
+        "401":
+          description: No autenticado
+        "403":
+          description: Acceso denegado
+        "404":
+          description: Archivo referenciado no encontrado
+        "409":
+          description: Conflicto al despachar el blob de ingesta
+        "422":
+          description: Error de validacion
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    SourceReference:
+      type: object
+      additionalProperties: false
+      description: Referencia a una fuente utilizada en la respuesta.
+      properties:
+        source_id:
+          type: string
+          description: Identificador unico de la fuente.
+        source_type:
+          type: string
+          description: Tipo o categoria de la fuente.
+        title:
+          type: string
+          description: Titulo legible de la fuente.
+        score:
+          type: number
+          description: Puntaje de relevancia asignado a la fuente.
+      required:
+        - source_id
+        - source_type
+        - title
+        - score
+
+    QueryRequest:
+      type: object
+      additionalProperties: false
+      description: Cuerpo de la solicitud para consultar el copiloto.
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Texto de la consulta del usuario.
+        session_id:
+          type:
+            - string
+            - "null"
+          description: Identificador opcional de sesion para continuidad conversacional.
+          default: null
+        stream:
+          type: boolean
+          description: Indica si la respuesta debe enviarse en streaming.
+          default: false
+      required:
+        - query
+
+    QueryResponse:
+      type: object
+      additionalProperties: false
+      description: Respuesta generada para una consulta del copiloto.
+      properties:
+        answer:
+          type: string
+          description: Respuesta generada para la consulta.
+        sources:
+          type: array
+          description: Fuentes utilizadas para construir la respuesta.
+          items:
+            $ref: "#/components/schemas/SourceReference"
+        tokens_used:
+          type: integer
+          description: Total de tokens consumidos.
+        latency_ms:
+          type: number
+          description: Latencia de la solicitud en milisegundos.
+        trace_id:
+          type: string
+          description: Identificador de trazabilidad para observabilidad.
+        session_id:
+          type: string
+          description: Identificador de sesion asociado a la solicitud.
+      required:
+        - answer
+        - sources
+        - tokens_used
+        - latency_ms
+        - trace_id
+        - session_id
+
+    IngestRequest:
+      type: object
+      additionalProperties: false
+      description: Cuerpo de la solicitud para registrar una ingesta administrativa sobre un archivo ya cargado en Blob Storage.
+      properties:
+        file_name:
+          type: string
+          minLength: 1
+          description: Nombre del archivo a ingerir.
+        file_url:
+          type: string
+          minLength: 1
+          description: Referencia al blob ya existente usando `blob://` o URL HTTPS de Azure Blob Storage.
+        knowledge_domain:
+          type: string
+          minLength: 1
+          description: Dominio de conocimiento asociado al archivo.
+        metadata:
+          type: object
+          minProperties: 1
+          description: Metadatos estructurados asociados a la solicitud de ingesta.
+          additionalProperties:
+            type: string
+      required:
+        - file_name
+        - file_url
+        - knowledge_domain
+        - metadata
+
+    IngestResponse:
+      type: object
+      additionalProperties: false
+      description: Respuesta de confirmacion para una solicitud de ingesta.
+      properties:
+        status:
+          type: string
+          description: Estado de la solicitud de ingesta.
+        message:
+          type: string
+          description: Mensaje de resultado de la solicitud de ingesta.
+        trace_id:
+          type: string
+          description: Identificador de trazabilidad para observabilidad.
+      required:
+        - status
+        - message
+        - trace_id
+
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      description: Respuesta del endpoint de salud del servicio.
+      properties:
+        status:
+          type: string
+          description: Estado general del servicio.
+        components:
+          type: object
+          description: Estado de los componentes internos.
+          additionalProperties:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+          description: Marca de tiempo en formato ISO 8601.
+      required:
+        - status
+        - components
+        - timestamp

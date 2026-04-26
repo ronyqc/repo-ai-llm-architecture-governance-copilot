@@ -1,0 +1,54 @@
+Payment Execution (Capability)
+1. Role Definition
+2. Example of Use
+3. Executive Summary
+4. Key Features
+Documentation
+Properties
+Appears on
+Relations
+1. Role Definition
+Payment Execution handles the back-end processing of a movement funds from a debtor account to a creditor account. Payments need to have been authorized and validated against customer/bank agreements before being instructed to Payment Execution. Payment Execution then determines whether debtor and creditor accounts are held within the bank and if not selects the appropriate payment mechanism/channel to use to complete the transfer. It is responsible for ensuring that both (or neither) sides of the exchange are completed successfully 
+2. Example of Use
+Example of use: 
+Funds are transferred from a customer's account with the bank to a payee account held at another bank
+
+3. Executive Summary
+This service domains processes the movement of funds between accounts within the bank or to/from an account held with another bank, selecting the appropriate payment mechanism
+4. Key Features
+Determine the appropriate payment mechanism 
+Retrieve counterparty payment instructions/preferences 
+
+Generate creditor and debtor instructions 
+
+Confirm (and report) both legs of the movement are completed
+
+Documentation
+** 1. Role ** 
+Payment Execution handles the back-end processing of a movement funds from a debtor account to a creditor account. Payments need to have been authorized and validated against customer/bank agreements before being instructed to Payment Execution. Payment Execution then determines whether debtor and creditor accounts are held within the bank and if not selects the appropriate payment mechanism/channel to use to complete the transfer. It is responsible for ensuring that both (or neither) sides of the exchange are completed successfully 
+
+ 
+
+** 2. Examples of use ** 
+
+Example of use: 
+
+Funds are transferred from a customer's account with the bank to a payee account held at another bank 
+
+ 
+
+** 3.Executive Summary ** 
+
+This service domains processes the movement of funds between accounts within the bank or to/from an account held with another bank, selecting the appropriate payment mechanism 
+
+ 
+
+** 4. Key Features ** 
+
+Determine the appropriate payment mechanism 
+
+Retrieve counterparty payment instructions/preferences 
+
+Generate creditor and debtor instructions 
+
+Confirm (and report) both legs of the movement are completed 

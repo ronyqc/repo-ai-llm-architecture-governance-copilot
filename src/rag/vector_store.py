@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+from urllib import error, parse, request
+
+try:
+    from azure.core.credentials import AzureKeyCredential
+    from azure.core.exceptions import AzureError
+    from azure.search.documents import SearchClient
+    from azure.search.documents.models import VectorizedQuery
+except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal local envs
+    AzureKeyCredential = None
+    SearchClient = Any
+    VectorizedQuery = None
+
+    class AzureError(Exception):
+        """Fallback Azure SDK base exception when azure-core is unavailable."""
+
+from src.core.config import Settings, settings
+from src.utils.logger import get_logger
+
+
+logger = get_logger(__name__)
+
+ALLOWED_KNOWLEDGE_DOMAINS = {
+    "bian",
+    "building_blocks",
+    "guidelines_patterns",
+}
+
+class AzureSearchConfigurationError(ValueError):
+    """Raised when Azure AI Search settings are incomplete or invalid."""
+
+
+class AzureSearchQueryError(RuntimeError):
+    """Raised when Azure AI Search query execution fails."""
+
+
+@dataclass(frozen=True)
+class SearchChunk:
+    """Normalized chunk retrieved from Azure AI Search."""
+
+    source_id: str
+    source_type: str
+    title: str
+    content: str
+    score: float
+    knowledge_domain: str
+    source_url: str | None
+    document_name: str
+    chunk_order: int | None
+    metadata: str | None
+    chunk_id: str | None
+    updated_at: str | None
+
+
+@dataclass(frozen=True)
+class SearchQuery:
+    """Input parameters for a retrieval operation."""
+
+    text: str
+    top_k: int
+    score_threshold: float = 0.0
+    knowledge_domain: str | None = None
+    vector: list[float] | None = None
+
+
+class AzureSearchVectorStore:
+    """Small wrapper around Azure AI Search used by the backend retriever."""
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        api_key: str,
+        index_name: str,
+        vector_field: str,
+        vector_dimensions: int,
+        client: SearchClient | None = None,
+    ) -> None:
+        self._endpoint = endpoint.strip()
+        self._api_key = api_key.strip()
+        self._index_name = index_name.strip()
+        self._vector_field = vector_field.strip()
+        self._vector_dimensions = vector_dimensions
+        self._validate_configuration()
+        if client is None and AzureKeyCredential is None:
+            raise AzureSearchConfigurationError(
+                "azure-search-documents and azure-core must be installed to use "
+                "AzureSearchVectorStore without an injected client."
+            )
+        self._client = client or SearchClient(
+            endpoint=self._endpoint,
+            index_name=self._index_name,
+            credential=AzureKeyCredential(self._api_key),
+        )
+
+    @classmethod
+    def from_settings(cls, app_settings: Settings = settings) -> "AzureSearchVectorStore":
+        return cls(
+            endpoint=app_settings.AZURE_SEARCH_ENDPOINT,
+            api_key=app_settings.AZURE_SEARCH_KEY,
+            index_name=app_settings.AZURE_SEARCH_INDEX,
+            vector_field=app_settings.AZURE_SEARCH_VECTOR_FIELD,
+            vector_dimensions=app_settings.AZURE_OPENAI_EMBEDDINGS_DIMENSIONS,
+        )
+
+    def search(self, query: SearchQuery) -> list[SearchChunk]:
+        self._validate_query(query)
+        filter_expression = self._build_filter(knowledge_domain=query.knowledge_domain)
+
+        logger.info(
+            "Executing Azure AI Search query against index '%s' with top_k=%s and knowledge_domain=%s",
+            self._index_name,
+            query.top_k,
+            query.knowledge_domain or "*",
+        )
+
+        try:
+            vector_queries = self._build_vector_queries(query)
+            results = self._client.search(
+                search_text=None,
+                filter=filter_expression,
+                top=query.top_k,
+                vector_queries=vector_queries,
+            )
+        except AzureError as exc:
+            logger.exception("Azure AI Search query failed")
+            raise AzureSearchQueryError(
+                "Azure AI Search query execution failed."
+            ) from exc
+
+        normalized_results: list[SearchChunk] = []
+        for result in results:
+            normalized_chunk = self._normalize_result(result)
+            if normalized_chunk.score >= query.score_threshold:
+                normalized_results.append(normalized_chunk)
+
+        logger.info(
+            "Azure AI Search returned %s chunks after applying score_threshold=%s",
+            len(normalized_results),
+            query.score_threshold,
+        )
+        return normalized_results
+
+    def check_health(self, timeout_seconds: float) -> None:
+        api_version = settings.AZURE_SEARCH_API_VERSION
+        encoded_index = parse.quote(self._index_name, safe="")
+        url = _ensure_https_url(
+            f"{self._endpoint}/indexes('{encoded_index}')"
+            f"?{parse.urlencode({'api-version': api_version})}"
+        )
+        req = request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "api-key": self._api_key,
+            },
+        )
+        try:
+            with request.urlopen(req, timeout=timeout_seconds) as response:  # nosec B310
+                if int(getattr(response, "status", 200) or 200) >= 400:
+                    raise AzureSearchQueryError(
+                        "Azure AI Search health check returned an unexpected status."
+                    )
+        except error.HTTPError as exc:
+            raise AzureSearchQueryError(
+                f"Azure AI Search health check failed with status {exc.code}."
+            ) from exc
+        except error.URLError as exc:
+            raise AzureSearchQueryError("Azure AI Search health check failed.") from exc
+
+    def _validate_configuration(self) -> None:
+        missing = []
+        if not self._endpoint:
+            missing.append("AZURE_SEARCH_ENDPOINT")
+        if not self._api_key:
+            missing.append("AZURE_SEARCH_KEY")
+        if not self._index_name:
+            missing.append("AZURE_SEARCH_INDEX")
+        if not self._vector_field:
+            missing.append("AZURE_SEARCH_VECTOR_FIELD")
+
+        if missing:
+            raise AzureSearchConfigurationError(
+                "Missing Azure AI Search configuration: "
+                + ", ".join(sorted(missing))
+            )
+        if self._vector_dimensions <= 0:
+            raise AzureSearchConfigurationError(
+                "Azure AI Search vector dimensions must be greater than zero."
+            )
+
+    @staticmethod
+    def _validate_query(query: SearchQuery) -> None:
+        if not query.text or not query.text.strip():
+            raise ValueError("Query text must be a non-empty string.")
+        if query.top_k <= 0:
+            raise ValueError("top_k must be greater than zero.")
+        if query.score_threshold < 0:
+            raise ValueError("score_threshold must be greater than or equal to zero.")
+        if query.knowledge_domain:
+            AzureSearchVectorStore._validate_knowledge_domain(query.knowledge_domain)
+        if query.vector is None:
+            raise ValueError("Query vector is required for vector retrieval.")
+        if not query.vector:
+            raise ValueError("Query vector must not be empty.")
+
+    @staticmethod
+    def _validate_knowledge_domain(knowledge_domain: str) -> None:
+        if knowledge_domain not in ALLOWED_KNOWLEDGE_DOMAINS:
+            raise ValueError(
+                "Invalid knowledge_domain "
+                f"'{knowledge_domain}'. Allowed values: "
+                f"{', '.join(sorted(ALLOWED_KNOWLEDGE_DOMAINS))}."
+            )
+
+    @classmethod
+    def _build_filter(cls, *, knowledge_domain: str | None) -> str | None:
+        if not knowledge_domain:
+            return None
+
+        cls._validate_knowledge_domain(knowledge_domain)
+        escaped_value = knowledge_domain.replace("'", "''")
+        return f"knowledge_domain eq '{escaped_value}'"
+
+    def _build_vector_queries(self, query: SearchQuery) -> list[Any]:
+        if len(query.vector or []) != self._vector_dimensions:
+            raise ValueError(
+                "Query vector dimension mismatch: "
+                f"expected {self._vector_dimensions}, received {len(query.vector or [])}."
+            )
+
+        if VectorizedQuery is None:
+            return [
+                {
+                    "vector": query.vector,
+                    "fields": self._vector_field,
+                    "k_nearest_neighbors": query.top_k,
+                }
+            ]
+
+        return [
+            VectorizedQuery(
+                vector=query.vector,
+                fields=self._vector_field,
+                k_nearest_neighbors=query.top_k,
+            )
+        ]
+
+    @staticmethod
+    def _normalize_result(result: dict) -> SearchChunk:
+        score = float(result.get("@search.score") or 0.0)
+        return SearchChunk(
+            source_id=str(result.get("id") or result.get("chunk_id") or ""),
+            source_type=str(result.get("source_type") or ""),
+            title=str(result.get("title") or ""),
+            content=str(result.get("content") or ""),
+            score=score,
+            knowledge_domain=str(result.get("knowledge_domain") or ""),
+            source_url=result.get("source_url"),
+            document_name=str(result.get("document_name") or ""),
+            chunk_order=result.get("chunk_order"),
+            metadata=result.get("metadata"),
+            chunk_id=result.get("chunk_id"),
+            updated_at=result.get("updated_at"),
+        )
+
+
+def _ensure_https_url(url: str) -> str:
+    parsed = parse.urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise AzureSearchConfigurationError(
+            "Azure AI Search endpoint must resolve to a valid HTTPS URL."
+        )
+    return url
