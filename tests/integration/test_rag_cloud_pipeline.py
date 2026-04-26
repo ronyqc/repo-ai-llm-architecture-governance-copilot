@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import requests
 
 
@@ -9,16 +10,19 @@ BASE_URL = os.getenv(
 )
 
 
+@pytest.mark.skipif(
+    not os.getenv("TEST_JWT_TOKEN"),
+    reason="Requiere TEST_JWT_TOKEN válido para ejecutar prueba RAG cloud.",
+)
 def test_rag_query_cloud_returns_answer_and_sources():
     """
     E3-3.7: Prueba de integración end-to-end del pipeline RAG.
 
     Requiere un JWT válido obtenido desde el frontend autenticado con Microsoft Entra ID.
-    El token debe configurarse temporalmente en la variable TEST_JWT_TOKEN.
+    En CI/CD se omite automáticamente si TEST_JWT_TOKEN no está configurado.
     """
 
     token = os.getenv("TEST_JWT_TOKEN")
-    assert token, "Falta TEST_JWT_TOKEN. Obtén un JWT válido desde el frontend autenticado."
 
     response = requests.post(
         f"{BASE_URL}/api/v1/query",
